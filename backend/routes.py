@@ -1,13 +1,13 @@
 # app/routes.py
-from flask import Blueprint, request, jsonify
-from demucs.apply import apply_model
-from demucs.pretrained import get_model
-from pathlib import Path
 import os
-import shutil
 import subprocess
+from pathlib import Path
+from flask_socketio import SocketIO
+from demucs.pretrained import get_model
+from flask import Blueprint, request, jsonify
 
 main = Blueprint('main', __name__)
+socketio = SocketIO()
 
 # Folder to store uploaded files
 UPLOAD_FOLDER = './uploads'
@@ -29,9 +29,9 @@ def upload_file():
         file.save(filepath)
 
         # Call Demucs sound separation
-        separated_audio = separate_audio(filepath)
+        socketio.start_background_task(target=separate_audio, filepath=filepath)
 
-        return jsonify({"message": "File processed", "separated_audio": separated_audio}), 200
+        return jsonify({"message": "File processed. Processing started."}), 200
 
 
 def separate_audio(filepath):
