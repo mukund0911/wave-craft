@@ -6,6 +6,8 @@ from flask_socketio import SocketIO
 from demucs.pretrained import get_model
 from flask import Blueprint, request, jsonify
 
+from backend.models.speech_music_classifier.sm_inference import sm_inference
+
 main = Blueprint('main', __name__)
 socketio = SocketIO()
 
@@ -28,10 +30,14 @@ def upload_file():
         filepath = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(filepath)
 
-        # Call Demucs sound separation
-        socketio.start_background_task(target=separate_audio, filepath=filepath)
+        # Predict whether the uploaded is is "speech" or "music"
+        prediction = sm_inference(filepath)
+        print(prediction)
 
-        return jsonify({"message": "File processed. Processing started."}), 200
+        # Call Demucs sound separation
+        # socketio.start_background_task(target=separate_audio, filepath=filepath)
+
+        return jsonify({"message": "File processed. Processing started.", "prediction": prediction}), 200
 
 
 def separate_audio(filepath):
