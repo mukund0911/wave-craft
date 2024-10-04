@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import '../styles/UploadButton.css';
 import axios from 'axios';
-import io from 'socket.io-client';
+import { useNavigate  } from 'react-router-dom';
 
 function UploadButton() {
+
+    const navigate = useNavigate();
 
     const handleFileInput = (event) => {
         const file = event.target.files[0];
@@ -17,9 +19,15 @@ function UploadButton() {
                 'content-type': 'multipart/form-data',
             },
         };
-        axios.post(url, formData, config).then((response) => {
-            console.log(response.data);
-        });
+        axios.post(url, formData, config)
+            .then((response) => {
+                const prediction = response.data.prediction
+                // Navigate to the prediction page with the result
+                navigate('/result', { state: { prediction: prediction } });
+            })
+            .catch((error) => {
+                console.error('Error uploading file:', error);
+            });
     };
     
     const handleButtonClick = () => {
