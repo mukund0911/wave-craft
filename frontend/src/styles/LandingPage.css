@@ -1,6 +1,27 @@
+@font-face {
+    font-family: 'DarwinSerif';
+    src: url('/fonts/darwin/font/DarwinSerif-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'OpenSauce';
+    src: url('/fonts/open_sauce/TTF/OpenSauceOne-Medium.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
 .landing-page {
-    display: flex;
-    flex-direction: column;
     justify-content: space-between;
     height: 100vh;
+    font-family: 'OpenSauce'
+}
+
+.description {
+    width: 60%;           /* Set the width to 60% */
+    margin: 10px auto auto;       /* Automatically distribute equal margins on the left and right */
+    text-align: left;   /* Optional: center the text inside the div */
+    padding: 20px;        /* Optional: add some padding */
+    font-size: 70px;
 }

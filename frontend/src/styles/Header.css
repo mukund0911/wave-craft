@@ -3,12 +3,14 @@
     padding: 20px;
     text-align: left;
     font-family: 'Pacifico', cursive;
-    font-weight: 400;
+    /* font-weight: 100; */
     font-style: normal;
+    border: 2px solid #ccc; /* Adds a solid border */
+    border-radius: 5px; /* Optional: rounded corners */
 }
 
 .header h1 {
-    margin: 0;
-    padding-left: 20px;
+    margin: auto;
+    /* padding-left: 20px; */
     font-size: 30px;
 }

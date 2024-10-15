@@ -4,7 +4,7 @@ import '../styles/Header.css';
 function Header() {
     return (
         <div className="header">
-            <h1>WaveCraft</h1>
+            <h1>Wavecraft</h1>
         </div>
     );
 }
