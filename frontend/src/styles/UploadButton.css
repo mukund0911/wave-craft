@@ -34,7 +34,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background-image: url("/images/building-an-early-warning-system.webp");
+    background-image: url("/images/Le_Monde_and_Prisa_Media.webp");
     background-size: cover;
     background-position: center;
     filter: blur(2px); 
@@ -47,8 +47,8 @@
     font-size: 22px;   
     color: #ffffff; 
     margin: 0 0 auto auto;
-    /* background-color: #ffffff; */
-    background: rgba(255, 255, 255, 0.35);
+    background-color: #202020;
+    /* background: rgba(255, 255, 255, 0.35); */
     border: none;
     border-radius: 5px;
     font-family: "OpenSauce";
@@ -63,6 +63,6 @@
 .file-formats {
     font-family: "OpenSauce";
     margin-top: 10px;
-    color: #ffffff; 
+    color: #202020; 
     font-size: 14px;
 }

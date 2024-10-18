@@ -1,7 +1,12 @@
 misc
 env_wave
 __pycache__
+
+uploads
+separated
+
 backend/datasets
+backend/models/venv-back
 
 frontend/node_modules
 frontend/.pnp

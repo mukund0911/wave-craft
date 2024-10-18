@@ -22,8 +22,9 @@ function UploadButton() {
         axios.post(url, formData, config)
             .then((response) => {
                 const prediction = response.data.prediction
+                const converted_text = response.data.converted_text
                 // Navigate to the prediction page with the result
-                navigate('/result', { state: { prediction: prediction } });
+                navigate('/result', { state: { prediction: prediction, converted_text: converted_text } });
             })
             .catch((error) => {
                 console.error('Error uploading file:', error);
