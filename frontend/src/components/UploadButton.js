@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import '../styles/UploadButton.css';
 import axios from 'axios';
 import { useNavigate  } from 'react-router-dom';
@@ -22,9 +22,9 @@ function UploadButton() {
         axios.post(url, formData, config)
             .then((response) => {
                 const prediction = response.data.prediction
-                const converted_text = response.data.converted_text
+                const conversations = response.data.conversations
                 // Navigate to the prediction page with the result
-                navigate('/result', { state: { prediction: prediction, converted_text: converted_text } });
+                navigate('/result', { state: { prediction: prediction, conversations: conversations } });
             })
             .catch((error) => {
                 console.error('Error uploading file:', error);

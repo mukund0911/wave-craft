@@ -1,41 +1,71 @@
 .main-page {
     justify-content: space-between;
     height: 100vh;
-    font-family: 'OpenSauce'
-}
-.editable {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    outline: none;
-    background-color: #f9f9f9;
+    font-family: 'OpenSauce';
 }
 
-.added {
-    background-color: yellow;
-    animation: highlight 1s ease-out;
+.speech-results{
+  width: 90%;           
+  padding: 20px;        
+  justify-content: center; /* Center content vertically */
+  align-items: center; /* Center content horizontally */
+  margin: 40px auto auto; /* Center the container itself */
+  border: none;
+  border-radius: 10px;
+  /* height: 200px; */
+  background-color: #202020;
+  color: white;
 }
 
-.deleted {
-    text-decoration: line-through;
-    color: red;
-    opacity: 0.6;
-    animation: fadeout 1s ease-out forwards;
+.text-block {
+    margin-bottom: 20px; /* Space between the text blocks */
+    
+  }
+  
+.centered-text {
+  font-size: 20px;
+  text-align: left; /* Align the conversation text to the left */
+  line-height: 1.5; /* Add space between lines */
 }
 
-@keyframes highlight {
-    0% {
-        background-color: yellow;
-    }
-    100% {
-        background-color: transparent;
-    }
+.speaker-label {
+  font-weight: bold;
+  font-size: 22px; /* Slightly larger font for speaker label */
+  margin-right: 10px;
+  display: inline-block; /* Ensure the speaker label stays next to the text */
 }
 
-@keyframes fadeout {
-    0% {
-        opacity: 1;
-    }
-    100% {
-        opacity: 0;
-    }
+.word-input {
+  padding: 5px;
+  font-size: 18px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-left: 5px;
 }
+
+.word-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+/* Floating input styling */
+input {
+  background-color: black;
+  color: white;
+  font-size: 18px;
+  padding: 10px 20px;
+  width: 200px;
+  border-radius: 25px;
+  border: 2px solid #fff;
+  text-align: center;
+  caret-color: white; /* Cursor color as white */
+  position: absolute;
+  z-index: 10;
+}
+
+/* Placeholder styling */
+input::placeholder {
+  color: white;
+  opacity: 0.7;
+}
+  

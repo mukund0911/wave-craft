@@ -6,91 +6,196 @@ import Header from './Header';
 function MainPage() {
     // Use useLocation to get the passed state
     const location = useLocation();
-    const { prediction, converted_text } = location.state || { };
+    const { prediction, conversations } = location.state || { };
+    // conversations = [conversations]
 
-    // Set the initial state with the passed text
-    const [editedText, setEditedText] = useState(converted_text);
-    const [previousText, setPreviousText] = useState(editedText);
+    const initialTextData = conversations.map((conv, index) => {
+        const key = Object.keys(conv)[0];
+        const conversation = conv[key];
+        const textArray = conversation.original.text.split(" ").map((word) => ({
+          word,
+          isStriked: false,
+          isNew: false,
+        }));
+        return {
+          conversationKey: key, // Store the conversation key (e.g., 'conv_0')
+          speaker: conversation.speaker,
+          textArray,
+          modified: conversation.modified,
+        };
+      });
 
-    const contentEditableRef = useRef(null);
+    const [texts, setTexts] = useState(initialTextData);
+    const [newWord, setNewWord] = useState("");
+    const [showInput, setShowInput] = useState({ index: null, pos: null });
+    const [inputPosition, setInputPosition] = useState({ top: 0, left: 0 });
+    const [insertIndex, setInsertIndex] = useState({
+        textIndex: null,
+        wordIndex: null,
+    });
+    const inputRef = useRef(null);
 
-     // Function to handle user edits in the textarea
-     const handleTextChange = (e) => {
-        setPreviousText(converted_text);
-        setEditedText(e.target.innerText); // Update the state with the new text
+    // Handle click to toggle strike-through
+    const handleWordClick = (textIndex, wordIndex) => {
+    const updatedTexts = [...texts];
+    updatedTexts[textIndex].textArray[wordIndex].isStriked =
+      !updatedTexts[textIndex].textArray[wordIndex].isStriked;
+    setTexts(updatedTexts);
     };
 
-    // Function to handle saving the text (submit back to server or local storage)
-    const handleSave = () => {
-        console.log("Saving modified text:", editedText);
-        // You can send this modified text back to the server using fetch or axios
-        // For example, sending it back to your Flask backend:
-        // axios.post('http://localhost:5000/save_text', { modified_text: editedText });
+
+    // Handle new word input and insertion
+    const handleNewWordInput = (e) => {
+        setNewWord(e.target.value);
     };
 
-    // Detect added or deleted characters
-    const detectChanges = () => {
-        const currentText = editedText.split('');
-        const previous = previousText.split('');
-
-        let result = "";
-        let i = 0;
-
-        // Compare current and previous text character by character
-        while (i < currentText.length || i < previous.length) {
-            if (i >= currentText.length) {
-                // If character exists in previous text but not in current
-                result += `<span class="deleted">${previous[i]}</span>`;
-            } else if (i >= previous.length) {
-                // If character exists in current text but not in previous
-                result += `<span class="added">${currentText[i]}</span>`;
-            } else if (currentText[i] !== previous[i]) {
-                // Detect differences (either addition or replacement)
-                result += `<span class="added">${currentText[i]}</span>`;
-                result += `<span class="deleted">${previous[i]}</span>`;
-            } else {
-                result += currentText[i];
-            }
-            i++;
+    const handleInsertWord = (e) => {
+        if (e.key === "Enter" && newWord.trim() !== "") {
+          const updatedTexts = [...texts];
+          const { textIndex, wordIndex } = insertIndex;
+          updatedTexts[textIndex].textArray.splice(wordIndex + 1, 0, {
+            word: newWord,
+            isStriked: false,
+            isNew: true,
+          });
+          setTexts(updatedTexts);
+          setNewWord("");
+          setShowInput({ index: null, pos: null }); // Hide input box after insertion
         }
-        return result;
     };
 
-    useEffect(() => {
-        // Update the contentEditable div with the result of detectChanges
-        const contentEditable = contentEditableRef.current;
-        contentEditable.innerHTML = detectChanges();
-    }, [editedText]);  // Re-run when the text changes
+    // Show input box where the cursor is
+    const handleShowInput = (event, textIndex, wordIndex) => {
+        const rect = event.target.getBoundingClientRect();
+        setInputPosition({
+        top: rect.top + window.scrollY - 30, // Position the input ABOVE the clicked word
+        left: rect.left + window.scrollX,
+        });
+        setInsertIndex({ textIndex, wordIndex });
+        setShowInput({ index: textIndex, pos: wordIndex });
+        setTimeout(() => {
+        inputRef.current.focus();
+        }, 0);
+    };
 
-    
+    // Process and save the updated text for each conversation
+    const handleSubmit = () => {
+        const updatedConversations = [...texts].map((conversation) => {
+        // Build the updated text by excluding strike-through words
+        const updatedText = conversation.textArray
+            .filter((wordObj) => !wordObj.isStriked)
+            .map((wordObj) => wordObj.word)
+            .join(" ");
+
+        // Save the updated text in the 'modified' dictionary
+        conversation.modified.text = updatedText;
+        return conversation;
+    });
+
+    // Return the modified dictionary exactly as input format
+    const finalStructure = updatedConversations.reduce((acc, conv) => {
+        acc[conv.conversationKey] = {
+          original: conversations.find((c) => c[conv.conversationKey]).original,
+          modified: conv.modified,
+          speaker: conv.speaker,
+        };
+        return acc;
+      }, {});
+  
+        console.log("Final updated dictionary format:", finalStructure);
+
+        // Send finalStructure to Flask backend using axios
+        axios.post('http://127.0.0.1:5000/conversations_modified', finalStructure)
+        .then((response) => {
+            console.log('Data sent successfully:', response.data);
+        })
+        .catch((error) => {
+            console.error('There was an error sending the data!', error);
+        });
+
+    };
 
     return (
         <div className="main-page">
             <Header />
-            <h2>Audio Analysis Result</h2>
-            <p>The uploaded audio is classified as: <strong>{prediction}</strong></p>
-            <p>Here's the audio transcript:</p>
+            <div className="speech-results">
+                <h2>Audio Analysis Result</h2>
+                <p>The uploaded audio is classified as: <strong>{prediction}</strong></p>
+                <p>Here's the audio transcript:</p>
 
-            <div
-                ref={contentEditableRef}
-                contentEditable
-                onInput={handleTextChange}
-                className="editable"
-                style={{ border: '1px solid #ccc', padding: '10px', fontSize: '16px', minHeight: '150px', width: '80%', margin: '0 auto' }}
-            ></div>
+                {texts.map((conversation, textIndex) => (
+                <div key={textIndex} className="text-block">
+                <div className="centered-text">
+                    <span className="speaker-label">
+                    Speaker {conversation.speaker}:
+                    </span>
+                    {conversation.textArray.map((item, wordIndex) => (
+                    <span key={wordIndex} style={{ position: "relative" }}>
+                        <span
+                        onClick={() => handleWordClick(textIndex, wordIndex)}
+                        style={{
+                            textDecoration: item.isStriked ? "line-through" : "none",
+                            color: item.isStriked
+                            ? "red"
+                            : item.isNew
+                            ? "green"
+                            : "white",
+                            cursor: "pointer",
+                        }}
+                        >
+                        {item.word}
+                        </span>{""}
+                        <span
+                        onClick={(e) => handleShowInput(e, textIndex, wordIndex)}
+                        style={{
+                            display: "inline-block",
+                            width: "10px", // Minimal space to detect click
+                            height: "20px",
+                            cursor: "text",
+                        }}
+                        ></span>
+                    </span>
+                    ))}
+                </div>
+                </div>
+            ))}
+            
+            {/* Floating input box */}
+            {showInput.index !== null && (
+                <input
+                ref={inputRef}
+                type="text"
+                value={newWord}
+                onChange={handleNewWordInput}
+                onKeyDown={handleInsertWord}
+                style={{
+                    backgroundColor: "black",
+                    color: "white",
+                    fontSize: "18px",
+                    padding: "10px 20px",
+                    width: "200px",
+                    borderRadius: "25px",
+                    border: "2px solid #fff",
+                    textAlign: "center",
+                    caretColor: "white", // Cursor color as white
+                    position: "absolute",
+                    top: `${inputPosition.top}px`,
+                    left: `${inputPosition.left}px`,
+                    zIndex: 10,
+                }}
+                placeholder="Enter new word"
+                />
+            )}
 
-            {/* <textarea
-                value={editedText}
-                onChange={handleTextChange}
-                rows="10"
-                cols="80"
-                style={{ fontSize: '16px', padding: '10px' }}
-            /> */}
-
-            {/* Save Button */}
-            <button onClick={handleSave} style={{ marginTop: '10px' }}>
-                Save Changes
+            {/* Submit button */}
+            <button
+                onClick={handleSubmit}
+                style={{ marginTop: "20px", padding: "10px 20px", fontSize: "16px" }}
+            >
+                Submit
             </button>
+            </div>
+
         </div>
     );
 }

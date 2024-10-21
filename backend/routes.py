@@ -1,13 +1,13 @@
 # app/routes.py
 import os
-import subprocess
-from pathlib import Path
+# import subprocess
+# from pathlib import Path
 from flask_socketio import SocketIO
-from demucs.pretrained import get_model
+# from demucs.pretrained import get_model
 from flask import Blueprint, request, jsonify
 
 from backend.models.speech_music_classifier.sm_inference import sm_inference
-from backend.models.speech_edit.speech_to_textv2 import speech_to_text
+from backend.models.speech_edit.speech_to_textv2 import SpeechModel
 
 main = Blueprint('main', __name__)
 socketio = SocketIO()
@@ -35,33 +35,47 @@ def upload_file():
         prediction = sm_inference(filepath)
 
         if prediction == "Speech":
-            converted_text = speech_to_text(filepath)
+            _speech_model = SpeechModel(filepath)
+            conversations = _speech_model.speech_to_text()
         else:
-            converted_text = "TODO"
+            separated_convs = "TODO"
 
         return jsonify({"message": "File processed. Processing started.", 
                         "prediction": prediction, 
-                        "converted_text" : converted_text}), 200
+                        "conversations" : conversations}), 200
+
+@main.route('/conversations_modified', methods=['POST'])  
+def modified_transcript():
+    try:
+        # Get the JSON data from the request
+        data = request.get_json()
+        
+
+        # Return a success message
+        return jsonify({"message": "Conversations received successfully!", "data": data}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+        
 
 
-def separate_audio(filepath):
-    """ This function separates the uploaded file into its components using Demucs. """
-    # Get model
-    model = get_model('htdemucs')  # Load Demucs model (htdemucs is a good general choice)
+# def separate_audio(filepath):
+#     """ This function separates the uploaded file into its components using Demucs. """
+#     # Get model
+#     model = get_model('htdemucs')  # Load Demucs model (htdemucs is a good general choice)
 
-    output_folder = Path(SEPARATED_FOLDER) / Path(filepath).stem
-    os.makedirs(output_folder, exist_ok=True)
+#     output_folder = Path(SEPARATED_FOLDER) / Path(filepath).stem
+#     os.makedirs(output_folder, exist_ok=True)
 
-    # Use subprocess to safely call Demucs
-    command = f"demucs {filepath} -o {output_folder}"
-    subprocess.run(command.split(), check=True)
+#     # Use subprocess to safely call Demucs
+#     command = f"demucs {filepath} -o {output_folder}"
+#     subprocess.run(command.split(), check=True)
 
-    # Check for separated files
-    result_folder = output_folder / Path(filepath).stem
-    if not result_folder.exists():
-        return {"error": "Separation failed"}
+#     # Check for separated files
+#     result_folder = output_folder / Path(filepath).stem
+#     if not result_folder.exists():
+#         return {"error": "Separation failed"}
 
-    # Collect all result files
-    result_files = [str(result_folder / f) for f in os.listdir(result_folder) if os.path.isfile(result_folder / f)]
+#     # Collect all result files
+#     result_files = [str(result_folder / f) for f in os.listdir(result_folder) if os.path.isfile(result_folder / f)]
 
-    return {"separated_files": result_files}
+#     return {"separated_files": result_files}
