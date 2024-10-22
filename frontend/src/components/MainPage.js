@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import '../styles/MainPage.css';
+import axios from 'axios';
 import Header from './Header';
 
 function MainPage() {
@@ -139,7 +140,7 @@ function MainPage() {
                             ? "red"
                             : item.isNew
                             ? "green"
-                            : "white",
+                            : "black",
                             cursor: "pointer",
                         }}
                         >

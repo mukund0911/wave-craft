@@ -1,16 +1,30 @@
 .header {
-    width: 100%;
-    padding: 20px;
-    text-align: left;
+    width: 70%;
+    padding: 15px;
+    margin: 20px auto auto;
     font-family: 'Pacifico', cursive;
-    /* font-weight: 100; */
+    color: #ffffff;
     font-style: normal;
-    border: 2px solid #ccc; /* Adds a solid border */
-    border-radius: 5px; /* Optional: rounded corners */
+    background-color: #fca311;
+    border: none; 
+    border-radius: 60px; 
+    display: flex;                 
+    justify-content: space-between; 
+    align-items: center;            
 }
 
 .header h1 {
-    margin: auto;
-    /* padding-left: 20px; */
+    margin: 0; 
+    margin-left: 20px;
     font-size: 30px;
+}
+
+.header a {
+    display: flex; 
+}
+
+.header img {
+    margin-right: 20px;
+    width: 40px;
+    height: auto;
 }

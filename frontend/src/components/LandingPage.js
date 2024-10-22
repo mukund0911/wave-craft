@@ -8,7 +8,7 @@ function LandingPage() {
         <div className="landing-page">
             <Header />
             <div class='description'>
-                Remix, Edit, and Transform Your Audio with Ease.
+                Remix and Edit Audio with Ease.
             </div>
             <UploadButton />
         </div>

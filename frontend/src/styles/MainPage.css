@@ -1,38 +1,35 @@
 .main-page {
     justify-content: space-between;
     height: 100vh;
-    font-family: 'OpenSauce';
+    font-family: "Montserrat", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 400;
+    font-style: normal;
 }
 
 .speech-results{
-  width: 90%;           
+  width: 70%;           
   padding: 20px;        
-  justify-content: center; /* Center content vertically */
-  align-items: center; /* Center content horizontally */
-  margin: 40px auto auto; /* Center the container itself */
-  border: none;
-  border-radius: 10px;
-  /* height: 200px; */
-  background-color: #202020;
-  color: white;
+  justify-content: center; 
+  align-items: center; 
+  margin: 40px auto auto;
 }
 
 .text-block {
-    margin-bottom: 20px; /* Space between the text blocks */
-    
-  }
+    margin-bottom: 20px; 
+}
   
 .centered-text {
   font-size: 20px;
-  text-align: left; /* Align the conversation text to the left */
-  line-height: 1.5; /* Add space between lines */
+  text-align: left; 
+  line-height: 1.5; 
 }
 
 .speaker-label {
   font-weight: bold;
-  font-size: 22px; /* Slightly larger font for speaker label */
+  font-size: 20px;
   margin-right: 10px;
-  display: inline-block; /* Ensure the speaker label stays next to the text */
+  display: inline-block; 
 }
 
 .word-input {

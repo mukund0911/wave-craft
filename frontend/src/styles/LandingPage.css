@@ -19,9 +19,9 @@
 }
 
 .description {
-    width: 60%;           /* Set the width to 60% */
-    margin: 10px auto auto;       /* Automatically distribute equal margins on the left and right */
-    text-align: left;   /* Optional: center the text inside the div */
+    width: 70%;           /* Set the width to 60% */
+    margin: 70px auto auto;       /* Automatically distribute equal margins on the left and right */
+    text-align: center;   /* Optional: center the text inside the div */
     padding: 20px;        /* Optional: add some padding */
-    font-size: 70px;
+    font-size: 60px;
 }

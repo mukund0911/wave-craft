@@ -51,7 +51,6 @@ def modified_transcript():
         data = request.get_json()
         
 
-        # Return a success message
         return jsonify({"message": "Conversations received successfully!", "data": data}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
