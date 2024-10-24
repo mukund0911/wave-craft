@@ -41,9 +41,9 @@ function UploadButton() {
                 <button className="upload-button" onClick={handleButtonClick}>Choose audio file to upload</button>
                 <input hidden type="file" id="file-input" className="file-input" onChange={handleFileInput} accept=".mp3, .wav" />
             </div>
-            <div class ="inner">
+            {/* <div class ="inner">
                 <p className="file-formats">Formats: .wav, .mp3</p>
-            </div>
+            </div> */}
         </div>
         
     );

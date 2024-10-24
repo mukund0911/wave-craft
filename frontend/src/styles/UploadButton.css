@@ -1,8 +1,6 @@
 @font-face {
-    font-family: 'OpenSauce';
-    src: url('/fonts/open_sauce/TTF/OpenSauceOne-Medium.ttf') format('truetype');
-    font-weight: normal;
-    font-style: normal;
+    font-family: 'SFOpen';
+    src: url('/fonts/sf-pro-display/SFPRODISPLAYREGULAR.OTF') format('opentype');
 }
 
 .inner {
@@ -21,12 +19,9 @@
     color: #ffffff; 
     margin: 0 0 auto auto;
     background-color: #202020;
-    /* background: rgba(255, 255, 255, 0.35); */
     border: none;
-    border-radius: 30px;
-    font-family: "OpenSauce";
-    font-weight: 600;
-    font-style: normal;
+    border-radius: 40px;
+    font-family: "SFOpen";
 }
 
 .upload-button:hover {
@@ -34,7 +29,7 @@
 }
 
 .file-formats {
-    font-family: "OpenSauce";
+    font-family: "SFOpen";
     margin-top: 8px;
     color: #202020; 
     font-size: 14px;

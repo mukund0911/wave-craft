@@ -7,8 +7,9 @@ function Header() {
         <div className="header">
             <h1>Wavecraft</h1>
             <a className='giticon' href="https://www.example.com" target="_blank" rel="noopener noreferrer">
-                <img src={giticon} alt="giticon" />
+                <img src={giticon} alt="giticon" /> 
             </a>
+            
         </div>
     );
 }
