@@ -36,26 +36,39 @@ def upload_file():
 
         if prediction == "Speech":
             _speech_model = SpeechModel(filepath)
-            conversations = _speech_model.speech_to_text()
+            conversations, full_audio = _speech_model.speech_to_text()
         else:
             separated_convs = "TODO"
 
         return jsonify({"message": "File processed. Processing started.", 
                         "prediction": prediction, 
+                        "full_audio" : full_audio,
                         "conversations" : conversations}), 200
 
 @main.route('/conversations_modified', methods=['POST'])  
 def modified_transcript():
-    try:
-        # Get the JSON data from the request
-        data = request.get_json()
-        
+    # Get the finalStructure JSON from the request
+    conversation_mod = request.files.get('conversationsUpdated')
+    full_audio_file = request.files.get('full_audio')
 
-        return jsonify({"message": "Conversations received successfully!", "data": data}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-        
+    if conversation_mod:
+        # Read the finalStructure JSON
+        final_structure_data = conversation_mod.read().decode('utf-8')
+        print("Received finalStructure:", final_structure_data)
 
+    if full_audio_file:
+        # Save the full_audio file
+        audio_path = os.path.join("uploads", full_audio_file.filename)
+        full_audio_file.save(audio_path)
+        print(f"Audio file received")
+
+    _speech_model = SpeechModel(f"./uploads/{full_audio_file.filename}")
+    modified_audio = _speech_model.text_to_speech(conversation_mod)
+
+
+    return jsonify({"message": "Data and audio received successfully!", 
+                    "modified_audio":modified_audio}), 200
+        
 
 # def separate_audio(filepath):
 #     """ This function separates the uploaded file into its components using Demucs. """
