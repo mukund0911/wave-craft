@@ -10,7 +10,7 @@ const WaveBackground = () => {
     const SEPARATION = 100, AMOUNTX = 100, AMOUNTY = 50;
     let container;
     let camera, scene, renderer;
-    let particles, particlePositions, count = 0;
+    let particles, count = 0;
 
     // Initialize
     const init = () => {

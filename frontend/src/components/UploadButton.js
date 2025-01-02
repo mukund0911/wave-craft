@@ -23,8 +23,9 @@ function UploadButton() {
             .then((response) => {
                 const prediction = response.data.prediction
                 const conversations = response.data.conversations
+                const full_audio = response.data.full_audio
                 // Navigate to the prediction page with the result
-                navigate('/result', { state: { prediction: prediction, conversations: conversations } });
+                navigate('/result', { state: { prediction: prediction, full_audio: full_audio, conversations: conversations } });
             })
             .catch((error) => {
                 console.error('Error uploading file:', error);
