@@ -2,10 +2,11 @@ name: Deploy to Heroku
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out code
@@ -23,6 +24,6 @@ jobs:
         uses: akhileshns/heroku-deploy@v3.13.15
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          heroku_app_name: "wave-crafter" #${{ secrets.HEROKU_APP_NAME }}
+          heroku_email: "mukundtelukunta@gmail.com" #${{ secrets.HEROKU_EMAIL }}
           usedocker: true
