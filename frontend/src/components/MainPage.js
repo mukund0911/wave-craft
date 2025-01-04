@@ -142,7 +142,7 @@ function MainPage() {
         }
 
         // Send FormData to Flask backend using axios
-        axios.post('${apiUrl}/conversations_modified', formData, {
+        axios.post(apiUrl + '/conversations_modified', formData, {
         headers: {
             'Content-Type': 'multipart/form-data'
         }
