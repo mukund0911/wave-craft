@@ -5,6 +5,8 @@ import axios from 'axios';
 import Header from './Header';
 
 function MainPage() {
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
     // Use useLocation to get the passed state
     const location = useLocation();
     const { prediction, full_audio, conversations } = location.state || { };
@@ -140,7 +142,7 @@ function MainPage() {
         }
 
         // Send FormData to Flask backend using axios
-        axios.post('http://127.0.0.1:5000/conversations_modified', formData, {
+        axios.post('${apiUrl}/conversations_modified', formData, {
         headers: {
             'Content-Type': 'multipart/form-data'
         }
