@@ -32,8 +32,8 @@ jobs:
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          pip install --upgrade pip
-          pip install --upgrade setuptools wheel
+          pip install "cython<3.0.0" wheel
+          pip install "pyyaml==5.4.1" --no-build-isolation
           git fetch --all --unshallow
           git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
 
