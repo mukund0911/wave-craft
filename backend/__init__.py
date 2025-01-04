@@ -7,7 +7,7 @@ def create_app():
     CORS(app, resources={
             r"/*": {
                 "origins": [
-                    "https://wave-crafter.com",
+                    "http://wave-crafter.com",
                     "http://localhost:5000"  # for local development
                 ]
             }
