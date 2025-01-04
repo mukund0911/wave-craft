@@ -10,7 +10,7 @@ function UploadButton() {
     const handleFileInput = (event) => {
         const file = event.target.files[0];
         event.preventDefault()
-        const url = process.env.REACT_APP_API_URL + "/upload" || 'http://127.0.0.1:5000/upload"';
+        const url = process.env.REACT_APP_API_URL + "upload" || 'http://127.0.0.1:5000/upload"';
         const formData = new FormData();
         formData.append('file', file);
         formData.append('fileName', file.name);
