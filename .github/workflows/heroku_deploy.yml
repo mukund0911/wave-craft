@@ -25,13 +25,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      # - name: Install dependencies
+      #   run: pip install -r requirements.txt
 
       - name: Deploy to Heroku
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
+          pip install --upgrade setuptools wheel
           git fetch --all --unshallow
           git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
 
