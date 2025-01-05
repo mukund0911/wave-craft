@@ -1,1 +1,1 @@
-web: gunicorn main:routes
+web: gunicorn app:create_app()
