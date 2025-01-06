@@ -25,7 +25,7 @@ jobs:
       - name: Build frontend
         run: npm run build --prefix frontend
         env:
-          REACT_APP_API_URL: https://wave-crafter.com/ # https://wave-crafter-3ad7c939239a.herokuapp.com/
+          REACT_APP_API_URL: https://wave-crafter-3ad7c939239a.herokuapp.com  
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
