@@ -1,1 +1,1 @@
-web: gunicorn main:routes
+web: gunicorn "backend:create_app()"
