@@ -1,4 +1,5 @@
 # import torch
+import os
 import base64
 import numpy as np
 from io import BytesIO
@@ -8,7 +9,7 @@ from collections import defaultdict
 import assemblyai as aai
 from pydub import AudioSegment
 
-from backend.models.config import ASSEMBLY_AI_KEY
+# from backend.models.config import ASSEMBLY_AI_KEY
 
 # from sample_dict import *
 
@@ -62,7 +63,7 @@ class SpeechModel:
         full_audio_base64 = self.wav_to_byte(full_audio)
 
         # Init Assembly AI API
-        aai.settings.api_key = ASSEMBLY_AI_KEY
+        aai.settings.api_key = os.getenv("ASSEMBLYAI_KEY")
         config = aai.TranscriptionConfig(speaker_labels=True)
 
         transcriber = aai.Transcriber()
