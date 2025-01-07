@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  assembly_ai_key: ${{ secrets.ASSEMBLYAI_KEY }}
+
 jobs:
   build:
     runs-on: ubuntu-22.04
