@@ -5,8 +5,8 @@ on:
     branches:
       - main
 
-env:
-  assembly_ai_key: ${{ secrets.ASSEMBLYAI_KEY }}
+# env:
+#   assembly_ai_key: ${{ secrets.ASSEMBLYAI_KEY }}
 
 jobs:
   build:
@@ -34,6 +34,7 @@ jobs:
       - name: Deploy to Heroku
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          assembly_ai_key: ${{ secrets.ASSEMBLYAI_KEY }}
         run: |
           pip install "cython<3.0.0" wheel
           pip install "pyyaml==5.4.1" --no-build-isolation

@@ -63,7 +63,7 @@ class SpeechModel:
         full_audio_base64 = self.wav_to_byte(full_audio)
 
         # Init Assembly AI API
-        aai.settings.api_key = os.environ['assembly_ai_key']
+        aai.settings.api_key = os.environ["assembly_ai_key"]
         config = aai.TranscriptionConfig(speaker_labels=True)
 
         transcriber = aai.Transcriber()
