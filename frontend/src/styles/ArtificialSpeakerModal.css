@@ -1,0 +1,233 @@
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px 16px 24px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: #333;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.close-button {
+    background: none;
+    border: none;
+    font-size: 28px;
+    cursor: pointer;
+    color: #999;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: background-color 0.2s;
+}
+
+.close-button:hover {
+    background-color: #f0f0f0;
+    color: #333;
+}
+
+.close-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.speaker-form {
+    padding: 24px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #333;
+    position: relative;
+}
+
+.tooltip {
+    display: inline-block;
+    margin-left: 8px;
+    cursor: help;
+    color: #007bff;
+    position: relative;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    width: 280px;
+    background-color: #333;
+    color: white;
+    text-align: center;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 1001;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -140px;
+    font-size: 12px;
+    font-weight: normal;
+    line-height: 1.4;
+}
+
+.tooltip:hover .tooltip-text {
+    visibility: visible;
+}
+
+.tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+.form-group textarea {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 100px;
+    transition: border-color 0.2s;
+}
+
+.form-group textarea:focus {
+    outline: none;
+    border-color: #007bff;
+}
+
+.form-group input[type="checkbox"] {
+    margin-right: 8px;
+    transform: scale(1.2);
+}
+
+.form-group select {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    background-color: white;
+    transition: border-color 0.2s;
+}
+
+.form-group select:focus {
+    outline: none;
+    border-color: #007bff;
+}
+
+.form-group input[type="range"] {
+    width: 100%;
+    margin-top: 8px;
+}
+
+.music-options {
+    background-color: #f8f9fa;
+    padding: 16px;
+    border-radius: 8px;
+    margin-top: 12px;
+    border-left: 4px solid #007bff;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.cancel-button, .submit-button {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 100px;
+}
+
+.cancel-button {
+    background-color: #6c757d;
+    color: white;
+}
+
+.cancel-button:hover:not(:disabled) {
+    background-color: #5a6268;
+}
+
+.submit-button {
+    background-color: #007bff;
+    color: white;
+}
+
+.submit-button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+.cancel-button:disabled, .submit-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+    .modal-content {
+        width: 95%;
+        margin: 10px;
+    }
+    
+    .modal-header {
+        padding: 16px 20px 12px 20px;
+    }
+    
+    .speaker-form {
+        padding: 20px;
+    }
+    
+    .tooltip-text {
+        width: 240px;
+        margin-left: -120px;
+    }
+}
