@@ -3,6 +3,8 @@ import { useLocation } from 'react-router-dom';
 import '../styles/MainPage.css';
 import axios from 'axios';
 import Header from './Header';
+import ArtificialSpeakerModal from './ArtificialSpeakerModal';
+import BackgroundMusicModal from './BackgroundMusicModal';
 
 function MainPage() {
     const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -21,6 +23,18 @@ function MainPage() {
     });
     const inputRef = useRef(null);
     const [audioUrl, setAudioUrl] = useState(null); // To store the Blob URL for the full_audio
+    
+    // Modal states
+    const [showArtificialSpeakerModal, setShowArtificialSpeakerModal] = useState(false);
+    const [showBackgroundMusicModal, setShowBackgroundMusicModal] = useState(false);
+    const [selectedConversationForMusic, setSelectedConversationForMusic] = useState(null);
+    const [insertAfterIndex, setInsertAfterIndex] = useState(null);
+    
+    // Final audio preview states
+    const [finalAudioUrl, setFinalAudioUrl] = useState(null);
+    const [finalAudioData, setFinalAudioData] = useState(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [showFinalAudioPreview, setShowFinalAudioPreview] = useState(false);
     
     // Convert byte array to Blob URL for audio playback
     useEffect(() => {
@@ -101,59 +115,105 @@ function MainPage() {
     };
 
     // Process and save the updated text for each conversation
-    const handleSubmit = () => {
-        const updatedConversations = [...texts].map((conversation) => {
-        // Build the updated text by excluding strike-through words
-        const updatedText = conversation.textArray
-            .filter((wordObj) => !wordObj.isStriked)
-            .map((wordObj) => wordObj.word)
-            .join(" ");
+    const handleSubmit = async () => {
+        setIsProcessing(true);
+        setShowFinalAudioPreview(false);
+        
+        try {
+            const updatedConversations = [...texts].map((conversation) => {
+                // Build the updated text by excluding strike-through words
+                const updatedText = conversation.textArray
+                    .filter((wordObj) => !wordObj.isStriked)
+                    .map((wordObj) => wordObj.word)
+                    .join(" ");
 
-        // Save the updated text in the 'modified' dictionary
-        conversation.modified.text = updatedText;
-        return conversation;
-    });
+                // Save the updated text in the 'modified' dictionary
+                conversation.modified.text = updatedText;
+                return conversation;
+            });
 
-    // Return the modified dictionary exactly as input format
-    const conversationsUpdated = updatedConversations.reduce((acc, conv) => {
-        const originalConversation = conversations.find((c) => c[conv.conversationKey]); // Access the original conversation
-    
-        acc[conv.conversationKey] = {
-          original: originalConversation ? originalConversation[conv.conversationKey].original : {}, // Get the original
-          modified: conv.modified,
-          speaker: conv.speaker,
-        };
-        return acc;
-      }, {});
-  
-        console.log("Final updated dictionary format:", conversationsUpdated);
+            // Prepare conversations data for the API - Include artificial speakers
+            const conversationsForAPI = updatedConversations.map((conv, index) => {
+                const conversationKey = conv.conversationKey || `conv_${index}`;
+                
+                // For artificial speakers, include their generated audio
+                const conversationData = {
+                    speaker: conv.speaker,
+                    original: {
+                        text: conv.textArray.map(w => w.word).join(" "),
+                        start: 0,
+                        end: 0
+                    },
+                    modified: {
+                        text: conv.modified.text
+                    }
+                };
 
-        // Create a FormData object to hold conversationsUpdated and the full_audio file
-        const formData = new FormData();
+                // Include AI-generated audio if available
+                if (conv.artificial && conv.audio_base64) {
+                    conversationData.original.speaker_audio = conv.audio_base64;
+                    conversationData.artificial = true;
+                    conversationData.speaker_characteristics = conv.speaker_characteristics;
+                } else if (conversations[index] && conversations[index][Object.keys(conversations[index])[0]]) {
+                    // Use original transcribed audio
+                    const originalConv = conversations[index][Object.keys(conversations[index])[0]];
+                    conversationData.original = {
+                        ...conversationData.original,
+                        ...originalConv.original
+                    };
+                }
 
-        // Append the conversationsUpdated as a JSON blob
-        const conversationsUpdatedBlob = new Blob([JSON.stringify(conversationsUpdated)], { type: "application/json" });
-        formData.append("conversationsUpdated", conversationsUpdatedBlob);
+                return { [conversationKey]: conversationData };
+            });
 
-        // Assuming full_audio is a Blob or File (binary data)
-        if (full_audio) {
-            const audioBlob = base64ToBlob(full_audio, 'audio/wav'); // Convert base64 to Blob
-            formData.append("full_audio", audioBlob, "full_audio.wav"); // Adjust the name and file type as needed
+            // Create FormData for the request
+            const formData = new FormData();
+            const conversationsBlob = new Blob([JSON.stringify(conversationsForAPI)], { type: "application/json" });
+            formData.append("conversationsUpdated", conversationsBlob);
+
+            // Add full audio if available
+            if (full_audio) {
+                const audioBlob = base64ToBlob(full_audio, 'audio/wav');
+                formData.append("full_audio", audioBlob, "full_audio.wav");
+            }
+
+            // Check if background music should be included
+            const hasBackgroundMusic = texts.some(conv => conv.hasBackgroundMusic);
+            if (hasBackgroundMusic) {
+                formData.append("include_background_music", "true");
+                formData.append("background_music_type", "calm"); // Default or detect from conversations
+            }
+
+            // Send request to backend
+            const response = await axios.post(apiUrl + '/conversations_modified', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+
+            if (response.data && response.data.modified_audio) {
+                // Create audio blob and URL for preview
+                const finalAudioBlob = base64ToBlob(response.data.modified_audio, 'audio/wav');
+                const finalAudioUrl = URL.createObjectURL(finalAudioBlob);
+                
+                setFinalAudioData({
+                    audioBase64: response.data.modified_audio,
+                    audioBlob: finalAudioBlob,
+                    duration: response.data.duration_seconds,
+                    hasBackgroundMusic: response.data.has_background_music,
+                    sampleRate: response.data.sample_rate
+                });
+                setFinalAudioUrl(finalAudioUrl);
+                setShowFinalAudioPreview(true);
+                
+                console.log('Final audio generated successfully:', response.data);
+            }
+        } catch (error) {
+            console.error('Error generating final audio:', error);
+            alert('Failed to generate final audio. Please try again.');
+        } finally {
+            setIsProcessing(false);
         }
-
-        // Send FormData to Flask backend using axios
-        axios.post(apiUrl + '/conversations_modified', formData, {
-        headers: {
-            'Content-Type': 'multipart/form-data'
-        }
-        })
-        .then((response) => {
-        console.log('Data and audio sent successfully:', response.modified_audio);
-        })
-        .catch((error) => {
-        console.error('There was an error sending the data and audio!', error);
-        });
-
     };
 
     // Utility function to convert base64 string to Blob
@@ -174,98 +234,360 @@ function MainPage() {
         return new Blob(byteArrays, { type: contentType });
     };
 
-    return (
+    // Download final audio function
+    const handleDownloadFinalAudio = () => {
+        if (finalAudioData && finalAudioData.audioBlob) {
+            const downloadUrl = URL.createObjectURL(finalAudioData.audioBlob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = `final_audio_${new Date().getTime()}.wav`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(downloadUrl);
+        }
+    };
+
+    // Format duration for display
+    const formatDuration = (seconds) => {
+        if (!seconds) return '0:00';
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    };
+
+    // Handler for adding conversations
+    const handleAddConversation = (index) => {
+        const updatedTexts = [...texts];
+        const newConversation = {
+            conversationKey: `conv_${texts.length}`,
+            speaker: "New",
+            textArray: [{
+                word: "New conversation",
+                isStriked: false,
+                isNew: true
+            }],
+            modified: { text: "New conversation" }
+        };
+        updatedTexts.splice(index + 1, 0, newConversation);
+        setTexts(updatedTexts);
+    };
+
+    // Handler for adding artificial speaker
+    const handleAddArtificialSpeaker = (index) => {
+        setInsertAfterIndex(index);
+        setShowArtificialSpeakerModal(true);
+    };
+
+    // Submit artificial speaker request
+    const handleArtificialSpeakerSubmit = async (requestData) => {
+        try {
+            const response = await axios.post(`${apiUrl}/add_artificial_speaker`, requestData, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.data && response.data.conversation_entry) {
+                const newConversation = response.data.conversation_entry;
+                
+                // Convert conversation entry to the format expected by the UI
+                const formattedConversation = {
+                    conversationKey: `conv_ai_${Date.now()}`,
+                    speaker: newConversation.speaker,
+                    textArray: [{
+                        word: newConversation.original.text,
+                        isStriked: false,
+                        isNew: true
+                    }],
+                    modified: newConversation.modified,
+                    artificial: true,
+                    speaker_characteristics: newConversation.speaker_characteristics,
+                    audio_base64: newConversation.original.speaker_audio
+                };
+
+                // Insert the new conversation after the specified index
+                const updatedTexts = [...texts];
+                const insertIndex = insertAfterIndex !== null ? insertAfterIndex + 1 : texts.length;
+                updatedTexts.splice(insertIndex, 0, formattedConversation);
+                setTexts(updatedTexts);
+
+                console.log('Artificial speaker created:', response.data);
+            }
+        } catch (error) {
+            console.error('Error creating artificial speaker:', error);
+            throw error;
+        }
+    };
+
+    // Handler for adding background music
+    const handleAddBackgroundMusic = (conversationIndex = null) => {
+        if (conversationIndex !== null) {
+            setSelectedConversationForMusic(texts[conversationIndex]);
+        } else {
+            setSelectedConversationForMusic(null);
+        }
+        setShowBackgroundMusicModal(true);
+    };
+
+    // Apply background music
+    const handleBackgroundMusicApply = async (requestData) => {
+        try {
+            const response = await axios.post(`${apiUrl}/add_background_music`, requestData, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.data && response.data.mixed_audio_base64) {
+                if (selectedConversationForMusic) {
+                    // Update specific conversation with background music
+                    const updatedTexts = [...texts];
+                    const conversationIndex = updatedTexts.findIndex(
+                        conv => conv.conversationKey === selectedConversationForMusic.conversationKey
+                    );
+                    
+                    if (conversationIndex !== -1) {
+                        updatedTexts[conversationIndex].audio_base64 = response.data.mixed_audio_base64;
+                        updatedTexts[conversationIndex].hasBackgroundMusic = true;
+                        updatedTexts[conversationIndex].musicType = response.data.music_type;
+                        setTexts(updatedTexts);
+                    }
+                } else {
+                    // Update full audio with background music
+                    const audioBlob = base64ToBlob(response.data.mixed_audio_base64, 'audio/wav');
+                    const newAudioUrl = URL.createObjectURL(audioBlob);
+                    setAudioUrl(newAudioUrl);
+                }
+
+                console.log('Background music applied:', response.data);
+            }
+        } catch (error) {
+            console.error('Error applying background music:', error);
+            throw error;
+        }
+    };
+
+     return (
         <div className="main-page">
             <Header />
             <div className="speech-results">
                 <h2>Audio Analysis Result</h2>
                 <p>The uploaded audio is classified as: <strong>{prediction}</strong></p>
 
-                {/* Render the audio player for the full audio */}
                 {audioUrl && (
                     <div className="audio-player">
                         <audio controls>
                             <source src={audioUrl} type="audio/wav" />
                             Your browser does not support the audio element.
                         </audio>
+                        <button 
+                            className="music-button"
+                            onClick={() => handleAddBackgroundMusic()}
+                            title="Add background music to entire conversation"
+                        >
+                            🎵 Add Background Music
+                        </button>
                     </div>
                 )}
 
                 <p>Here's the audio transcript:</p>
 
-                {texts.map((conversation, textIndex) => (
-                <div key={textIndex} className="text-block">
-                <div className="centered-text">
-                    <span className="speaker-label">
-                    Speaker {conversation.speaker}:
-                    </span>
-                    {conversation.textArray.map((item, wordIndex) => (
-                    <span key={wordIndex} style={{ position: "relative" }}>
-                        <span
-                        onClick={() => handleWordClick(textIndex, wordIndex)}
-                        style={{
-                            textDecoration: item.isStriked ? "line-through" : "none",
-                            color: item.isStriked
-                            ? "red"
-                            : item.isNew
-                            ? "green"
-                            : "black",
-                            cursor: "pointer",
-                        }}
-                        >
-                        {item.word}
-                        </span>{""}
-                        <span
-                        onClick={(e) => handleShowInput(e, textIndex, wordIndex)}
-                        style={{
-                            display: "inline-block",
-                            width: "10px", // Minimal space to detect click
-                            height: "20px",
-                            cursor: "text",
-                        }}
-                        ></span>
-                    </span>
+                <div className="conversation-container">
+                    {texts.map((conversation, textIndex) => (
+                        <React.Fragment key={textIndex}>
+                            <div className="conversation-block">
+                                <div className="text-block">
+                                    <div className="centered-text">
+                                        <span className={`speaker-label ${conversation.artificial ? 'artificial-speaker' : ''}`}>
+                                            Speaker {conversation.speaker}:
+                                            {conversation.artificial && <span className="ai-badge">AI</span>}
+                                            {conversation.hasBackgroundMusic && <span className="music-badge">🎵</span>}
+                                        </span>
+                                        {conversation.textArray.map((item, wordIndex) => (
+                                            <span key={wordIndex} style={{ position: "relative" }}>
+                                                <span
+                                                    onClick={() => handleWordClick(textIndex, wordIndex)}
+                                                    style={{
+                                                        textDecoration: item.isStriked ? "line-through" : "none",
+                                                        color: item.isStriked
+                                                            ? "red"
+                                                            : item.isNew
+                                                                ? "green"
+                                                                : "black",
+                                                        cursor: "pointer",
+                                                    }}
+                                                >
+                                                    {item.word}
+                                                </span>{" "}
+                                                <span
+                                                    onClick={(e) => handleShowInput(e, textIndex, wordIndex)}
+                                                    style={{
+                                                        display: "inline-block",
+                                                        width: "10px",
+                                                        height: "20px",
+                                                        cursor: "text",
+                                                    }}
+                                                ></span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="conversation-actions">
+                                    <button
+                                        className="action-button music-action"
+                                        onClick={() => handleAddBackgroundMusic(textIndex)}
+                                        title="Add background music to this conversation"
+                                    >
+                                        🎵
+                                    </button>
+                                    {conversation.audio_base64 && (
+                                        <audio 
+                                            controls 
+                                            className="conversation-audio"
+                                            src={`data:audio/wav;base64,${conversation.audio_base64}`}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                            <div className="conversation-controls">
+                                <button
+                                    className="add-conversation-button regular"
+                                    onClick={() => handleAddConversation(textIndex)}
+                                    title="Add new conversation"
+                                >
+                                    + Add Conversation
+                                </button>
+                                <button
+                                    className="add-conversation-button ai"
+                                    onClick={() => handleAddArtificialSpeaker(textIndex)}
+                                    title="Add AI speaker"
+                                >
+                                    🤖 Add AI Speaker
+                                </button>
+                            </div>
+                        </React.Fragment>
                     ))}
                 </div>
-                </div>
-            ))}
-            
-            {/* Floating input box */}
-            {showInput.index !== null && (
-                <input
-                ref={inputRef}
-                type="text"
-                value={newWord}
-                onChange={handleNewWordInput}
-                onKeyDown={handleInsertWord}
-                style={{
-                    backgroundColor: "black",
-                    color: "white",
-                    fontSize: "18px",
-                    padding: "10px 20px",
-                    width: "200px",
-                    borderRadius: "25px",
-                    border: "2px solid #fff",
-                    textAlign: "center",
-                    caretColor: "white", // Cursor color as white
-                    position: "absolute",
-                    top: `${inputPosition.top}px`,
-                    left: `${inputPosition.left}px`,
-                    zIndex: 10,
-                }}
-                placeholder="Enter new word"
-                />
-            )}
 
-            {/* Submit button */}
-            <button
-                onClick={handleSubmit}
-                style={{ marginTop: "20px", padding: "10px 20px", fontSize: "16px" }}
-            >
-                Submit
-            </button>
+                {/* Floating input box */}
+                {showInput.index !== null && (
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        value={newWord}
+                        onChange={handleNewWordInput}
+                        onKeyDown={handleInsertWord}
+                        style={{
+                            position: "absolute",
+                            top: `${inputPosition.top}px`,
+                            left: `${inputPosition.left}px`,
+                            zIndex: 10,
+                        }}
+                        placeholder="Enter new word"
+                    />
+                )}
+
+                <button
+                    onClick={handleSubmit}
+                    disabled={isProcessing}
+                    style={{
+                        marginTop: "20px",
+                        padding: "10px 20px",
+                        fontSize: "16px",
+                        backgroundColor: isProcessing ? "#666" : "#000",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: isProcessing ? "not-allowed" : "pointer"
+                    }}
+                >
+                    {isProcessing ? "Processing..." : "Submit"}
+                </button>
+
+                {/* Final Audio Preview */}
+                {showFinalAudioPreview && finalAudioUrl && (
+                    <div className="final-audio-preview" style={{
+                        marginTop: "30px",
+                        padding: "20px",
+                        border: "2px solid #4CAF50",
+                        borderRadius: "10px",
+                        backgroundColor: "#f9f9f9"
+                    }}>
+                        <h3 style={{ color: "#4CAF50", marginBottom: "15px" }}>
+                            🎉 Final Audio Ready!
+                        </h3>
+                        
+                        <div className="audio-info" style={{ marginBottom: "15px" }}>
+                            <p><strong>Duration:</strong> {formatDuration(finalAudioData?.duration)}</p>
+                            <p><strong>Quality:</strong> {finalAudioData?.sampleRate || 22050} Hz</p>
+                            {finalAudioData?.hasBackgroundMusic && (
+                                <p><strong>Background Music:</strong> ✅ Included</p>
+                            )}
+                        </div>
+
+                        <div className="audio-controls" style={{ 
+                            display: "flex", 
+                            alignItems: "center", 
+                            gap: "15px",
+                            flexWrap: "wrap"
+                        }}>
+                            <audio 
+                                controls 
+                                style={{ flex: "1", minWidth: "300px" }}
+                                src={finalAudioUrl}
+                            >
+                                Your browser does not support the audio element.
+                            </audio>
+                            
+                            <button
+                                onClick={handleDownloadFinalAudio}
+                                style={{
+                                    padding: "10px 20px",
+                                    fontSize: "14px",
+                                    backgroundColor: "#4CAF50",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: "5px",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px"
+                                }}
+                            >
+                                📥 Download Audio
+                            </button>
+                        </div>
+
+                        <div className="processing-info" style={{ 
+                            marginTop: "15px", 
+                            fontSize: "12px", 
+                            color: "#666",
+                            fontStyle: "italic"
+                        }}>
+                            <p>✅ Audio processed with style preservation and quality enhancement</p>
+                            {finalAudioData?.hasBackgroundMusic && (
+                                <p>🎵 Background music seamlessly integrated</p>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
+            <ArtificialSpeakerModal
+                isOpen={showArtificialSpeakerModal}
+                onClose={() => setShowArtificialSpeakerModal(false)}
+                onSubmit={handleArtificialSpeakerSubmit}
+                conversationHistory={conversations}
+            />
+
+            <BackgroundMusicModal
+                isOpen={showBackgroundMusicModal}
+                onClose={() => setShowBackgroundMusicModal(false)}
+                onApply={handleBackgroundMusicApply}
+                audioData={selectedConversationForMusic?.audio_base64 || full_audio}
+                speakerInfo={selectedConversationForMusic}
+            />
         </div>
     );
 }

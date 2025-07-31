@@ -1,13 +1,13 @@
 import React from 'react';
 import Header from './Header';
 import UploadButton from './UploadButton';
-import WaveBackground from './WaveBackground';
+// import WaveBackground from './WaveBackground';
 import '../styles/LandingPage.css';
 
 function LandingPage() {
     return (
         <div className="landing-page">
-            <WaveBackground />
+            {/* <WaveBackground /> */}
             <div className='content'>
                 <Header />
             

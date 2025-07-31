@@ -1,21 +1,30 @@
 .header {
     width: 90%;
-    padding: 15px;
-    margin: 20px auto auto;
+    padding: 10px;
+    margin: 10px auto 0; 
     font-family: "Crete Round", serif;
-    font-weight: 400;
-    font-style: normal;
-    color: #000000;
-    display: flex;                 
-    justify-content: space-between; 
-    align-items: center;            
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 15px;
+    background-color: rgba(0, 0, 0, 0.219); 
+    backdrop-filter: blur(10px); 
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.2); 
+    position: sticky;
+    top: 7vh; 
+    z-index: 100;
 }
 
 .header h1 {
     margin: 0; 
     margin-left: 20px;
-    font-size: 35px;
+    font-size: 25px;
+    font-weight: 300;
+    color:#e0e0e0d6;
 }
+
 
 /* .header a{
     margin-right: 20px;

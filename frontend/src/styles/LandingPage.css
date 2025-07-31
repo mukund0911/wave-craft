@@ -1,4 +1,4 @@
-@font-face {
+/* @font-face {
     font-family: 'DarwinSerif';
     src: url('/fonts/darwin/font/DarwinSerif-Regular.ttf') format('truetype');
     font-weight: normal;
@@ -10,17 +10,31 @@
     src: url('/fonts/open_sauce/TTF/OpenSauceOne-Medium.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
-}
+} */
 
-@font-face {
+/* @font-face {
     font-family: 'SFOpen';
     src: url('/fonts/sf-pro-display/SFPRODISPLAYREGULAR.OTF') format('opentype');
+} */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 90%; /* Ensures the background covers the full height of the viewport */
+  background-color: black; /* Sets the background of the page to blue */
 }
 
 .landing-page {
-    justify-content: space-between;
-    height: 100vh;
-    font-family: 'SFOpen'
+    width: calc(100vw - 4vw); /* 100vw - 10% from left - 10% from right */
+    height: calc(100vh - 8vh); /* 100vh - 10% from top - 10% from bottom */
+    margin: 4vh 2vw; 
+    font-family: 'SFOpen';
+    border-radius: 15px;
+
+    background-image: url('/images/praveen-sundarajan-8246klvfHZ8-unsplash.jpg'); 
+    background-size: cover; 
+    background-position: center;
+    background-repeat: no-repeat;
 }
 
 .description {
@@ -29,6 +43,8 @@
     text-align: center;   /* Optional: center the text inside the div */
     padding: 20px;        /* Optional: add some padding */
     font-size: 60px;
+    color: #e0e0e0d6;
+    font-family: "Crete Round", serif;
 }
 
 .content {

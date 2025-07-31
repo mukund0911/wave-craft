@@ -67,4 +67,236 @@ input::placeholder {
   color: white;
   opacity: 0.7;
 }
+
+.conversation-controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.add-conversation-button {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.add-conversation-button.regular {
+  background: linear-gradient(45deg, #007bff, #0056b3);
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
+}
+
+.add-conversation-button.regular:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(0, 123, 255, 0.4);
+}
+
+.add-conversation-button.ai {
+  background: linear-gradient(45deg, #28a745, #1e7e34);
+  color: white;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.add-conversation-button.ai:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+
+.speaker-label.artificial-speaker {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.ai-badge {
+  background: #28a745;
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: bold;
+}
+
+.music-badge {
+  margin-left: 8px;
+  opacity: 0.7;
+}
+
+.conversation-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.action-button {
+  background: none;
+  border: 2px solid #007bff;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-button:hover {
+  background-color: #007bff;
+  transform: scale(1.1);
+}
+
+.action-button.music-action {
+  border-color: #ffc107;
+}
+
+.action-button.music-action:hover {
+  background-color: #ffc107;
+}
+
+.conversation-audio {
+  height: 32px;
+  flex: 1;
+}
+
+.music-button {
+  background: linear-gradient(45deg, #ffc107, #e0a800);
+  color: #333;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: 12px;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.music-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
+}
+
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 16px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.audio-player audio {
+  flex: 1;
+}
+
+.conversation-block {
+    background-color: #f5f5f5;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+/* Final Audio Preview Styles */
+.final-audio-preview {
+  animation: slideInUp 0.4s ease-out;
+  box-shadow: 0 4px 20px rgba(76, 175, 80, 0.2);
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.final-audio-preview h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  margin: 0 0 15px 0;
+}
+
+.audio-info {
+  background-color: white;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.audio-info p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.audio-controls {
+  background-color: white;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.audio-controls audio {
+  outline: none;
+}
+
+.audio-controls button {
+  white-space: nowrap;
+}
+
+.audio-controls button:hover {
+  background-color: #45a049;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(69, 160, 73, 0.3);
+}
+
+.processing-info {
+  text-align: center;
+  padding: 10px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border-radius: 6px;
+}
+
+.processing-info p {
+  margin: 2px 0;
+}
+
+/* Responsive design for final audio preview */
+@media (max-width: 768px) {
+  .audio-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .audio-controls audio {
+    margin-bottom: 10px;
+    min-width: auto;
+  }
+  
+  .audio-controls button {
+    align-self: center;
+  }
+}
   
