@@ -84,7 +84,137 @@ class SpeechProcessingAgent(MCPAgent):
         except Exception as e:
             self.logger.error(f"Transcription error: {str(e)}")
             return self.create_response(False, error=f"Failed to transcribe audio: {str(e)}")
-    
+
+    def submit_transcription_async(self, audio_path: str) -> str:
+        """
+        Submit async transcription job to AssemblyAI
+        Returns: transcript_id for polling
+        """
+        try:
+            self.logger.info(f"Submitting async transcription for: {audio_path}")
+
+            # Optimize audio first
+            optimized_path = self._optimize_audio(audio_path)
+            self.logger.info(f"Audio optimized to: {optimized_path}")
+
+            # Configure AssemblyAI
+            config = aai.TranscriptionConfig(
+                speaker_labels=True,
+                speech_model=aai.SpeechModel.best
+            )
+
+            transcriber = aai.Transcriber()
+            self.logger.info("Submitting to AssemblyAI...")
+            transcript = transcriber.submit(optimized_path, config=config)
+
+            self.logger.info(f"Submitted successfully, transcript_id: {transcript.id}")
+            return transcript.id
+
+        except Exception as e:
+            self.logger.error(f"Failed to submit async transcription: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def get_transcription_status(self, audio_path: str, transcript_id: str) -> Dict[str, Any]:
+        """
+        Check status of async transcription
+        Returns: dict with status and result if complete
+        """
+        try:
+            self.logger.info(f"Checking status for transcript_id: {transcript_id}")
+
+            transcript = aai.Transcript.get_by_id(transcript_id)
+
+            self.logger.info(f"Transcript status: {transcript.status}")
+
+            # Get status string
+            status = str(transcript.status).lower()
+            if hasattr(transcript.status, 'value'):
+                status = transcript.status.value
+
+            self.logger.info(f"Parsed status: {status}")
+
+            # Handle completed transcription
+            if 'completed' in status or status == 'completed':
+                self.logger.info("Status is completed, processing results...")
+
+                full_audio = AudioSegment.from_file(audio_path, format="wav")
+                full_audio_base64 = self._wav_to_byte(full_audio)
+
+                conversations_sep = []
+                for index, utterance in enumerate(transcript.utterances):
+                    words = {'original': {}, 'modified': {}}
+                    start, end = utterance.start, utterance.end
+
+                    words['speaker'] = utterance.speaker
+                    words['original']['text'] = utterance.text
+                    words['original']['start'] = start
+                    words['original']['end'] = end
+
+                    speaker_audio = full_audio[start:end]
+                    audio_base64 = self._wav_to_byte(speaker_audio)
+                    words['original']['speaker_audio'] = audio_base64
+
+                    words['modified'] = {'text': utterance.text}
+
+                    conversations_sep.append({f"conv_{index}": words})
+
+                return {
+                    'status': 'completed',
+                    'conversations': conversations_sep,
+                    'full_audio': full_audio_base64
+                }
+
+            elif 'error' in status or status == 'error':
+                return {
+                    'status': 'error',
+                    'error': str(getattr(transcript, 'error', 'Unknown error'))
+                }
+
+            else:
+                self.logger.info(f"Status is: {status}")
+                return {
+                    'status': status  # 'queued' or 'processing'
+                }
+
+        except Exception as e:
+            self.logger.error(f"Exception in get_transcription_status: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'status': 'error',
+                'error': f'Failed to get transcript status: {str(e)}'
+            }
+
+    def _optimize_audio(self, audio_path: str) -> str:
+        """Optimize audio for faster transcription - mono, 16kHz"""
+        try:
+            self.logger.info(f"Loading audio from: {audio_path}")
+            audio = AudioSegment.from_file(audio_path)
+
+            self.logger.info(f"Original: {audio.channels} channels, {audio.frame_rate}Hz")
+
+            # Convert to mono and downsample to 16kHz (optimal for AssemblyAI)
+            audio = audio.set_channels(1)
+            audio = audio.set_frame_rate(16000)
+
+            self.logger.info(f"Optimized: {audio.channels} channels, {audio.frame_rate}Hz")
+
+            # Export optimized version
+            optimized_path = audio_path.replace('.wav', '_optimized.wav')
+            self.logger.info(f"Exporting to: {optimized_path}")
+            audio.export(optimized_path, format="wav")
+
+            self.logger.info("Audio optimization complete")
+            return optimized_path
+
+        except Exception as e:
+            self.logger.error(f"Failed to optimize audio: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+
     async def _process_modifications(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process text modifications and prepare for audio generation"""
         required_fields = ["conversations", "modifications"]

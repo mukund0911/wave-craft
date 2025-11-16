@@ -1,6 +1,8 @@
 misc
 env_wave
+venv_wave
 __pycache__
+.claude
 
 uploads
 separated
@@ -8,6 +10,7 @@ separated
 backend/datasets
 backend/models/venv-back
 backend/models/config.py
+backend/models/speech_edit/style_venv
 
 frontend/node_modules
 frontend/.pnp

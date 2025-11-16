@@ -6,10 +6,17 @@ from flask_socketio import SocketIO
 from flask import Blueprint, request, jsonify
 
 from backend.models.speech_music_classifier.sm_inference import sm_inference
-from backend.models.speech_edit.speech_to_textv2 import SpeechModel
+from backend.mcp_agents.agent_coordinator import AgentCoordinator
+from backend.models.config import ASSEMBLY_AI_KEY, OPENAI_API_KEY
 
 main = Blueprint('main', __name__)
 socketio = SocketIO()
+
+# Initialize MCP Agent Coordinator
+agent_coordinator = AgentCoordinator(
+    openai_api_key=OPENAI_API_KEY,
+    assembly_ai_key=ASSEMBLY_AI_KEY
+)
 
 # Folder to store uploaded files
 UPLOAD_FOLDER = './uploads'
@@ -72,11 +79,9 @@ def upload_file():
         prediction = sm_inference(filepath)
 
         if prediction == "Speech":
-            _speech_model = SpeechModel(filepath)
-
-            # Submit async job
+            # Submit async transcription using MCP agent
             print(f"[DEBUG] Submitting async transcription for: {filepath}")
-            transcript_id = _speech_model.speech_to_text_async()
+            transcript_id = agent_coordinator.speech_agent.submit_transcription_async(filepath)
             print(f"[DEBUG] Got transcript_id: {transcript_id}")
 
             # Store job info
@@ -121,8 +126,8 @@ def check_status(job_id):
 
         print(f"[DEBUG] filepath: {filepath}, transcript_id: {transcript_id}")
 
-        _speech_model = SpeechModel(filepath)
-        result = _speech_model.get_transcript_status(transcript_id)
+        # Get transcription status using MCP agent
+        result = agent_coordinator.speech_agent.get_transcription_status(filepath, transcript_id)
 
         print(f"[DEBUG] Result from get_transcript_status: {result}")
 
