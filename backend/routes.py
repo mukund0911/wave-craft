@@ -197,9 +197,8 @@ def modified_transcript():
 
         # Import the speech processing agent
         from backend.mcp_agents.speech_processing_agent import SpeechProcessingAgent
-        from backend.models.config import ASSEMBLY_AI_KEY
 
-        # Initialize the agent
+        # Initialize the agent (using env var from top of file)
         speech_agent = SpeechProcessingAgent(ASSEMBLY_AI_KEY)
 
         # Prepare request for final audio generation
