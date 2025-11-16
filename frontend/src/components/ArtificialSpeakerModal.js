@@ -3,18 +3,7 @@ import '../styles/ArtificialSpeakerModal.css';
 
 function ArtificialSpeakerModal({ isOpen, onClose, onSubmit, conversationHistory }) {
     const [speakerPrompt, setSpeakerPrompt] = useState('');
-    const [addBackgroundMusic, setAddBackgroundMusic] = useState(false);
-    const [musicType, setMusicType] = useState('calm');
-    const [musicVolume, setMusicVolume] = useState(0.3);
     const [isLoading, setIsLoading] = useState(false);
-
-    const musicTypes = [
-        { value: 'calm', label: 'Calm & Ambient' },
-        { value: 'upbeat', label: 'Upbeat & Energetic' },
-        { value: 'dramatic', label: 'Dramatic & Orchestral' },
-        { value: 'corporate', label: 'Corporate & Professional' },
-        { value: 'nature', label: 'Nature Sounds' }
-    ];
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -27,18 +16,12 @@ function ArtificialSpeakerModal({ isOpen, onClose, onSubmit, conversationHistory
 
         const requestData = {
             conversation_history: conversationHistory,
-            speaker_prompt: speakerPrompt,
-            add_background_music: addBackgroundMusic,
-            music_type: musicType,
-            music_volume: musicVolume
+            speaker_prompt: speakerPrompt
         };
 
         try {
             await onSubmit(requestData);
             setSpeakerPrompt('');
-            setAddBackgroundMusic(false);
-            setMusicType('calm');
-            setMusicVolume(0.3);
             onClose();
         } catch (error) {
             console.error('Error creating artificial speaker:', error);
@@ -82,54 +65,6 @@ function ArtificialSpeakerModal({ isOpen, onClose, onSubmit, conversationHistory
                             required
                         />
                     </div>
-
-                    <div className="form-group">
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={addBackgroundMusic}
-                                onChange={(e) => setAddBackgroundMusic(e.target.checked)}
-                                disabled={isLoading}
-                            />
-                            Add Background Music
-                        </label>
-                    </div>
-
-                    {addBackgroundMusic && (
-                        <div className="music-options">
-                            <div className="form-group">
-                                <label htmlFor="musicType">Music Type</label>
-                                <select
-                                    id="musicType"
-                                    value={musicType}
-                                    onChange={(e) => setMusicType(e.target.value)}
-                                    disabled={isLoading}
-                                >
-                                    {musicTypes.map(type => (
-                                        <option key={type.value} value={type.value}>
-                                            {type.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="form-group">
-                                <label htmlFor="musicVolume">
-                                    Music Volume: {Math.round(musicVolume * 100)}%
-                                </label>
-                                <input
-                                    type="range"
-                                    id="musicVolume"
-                                    min="0"
-                                    max="1"
-                                    step="0.1"
-                                    value={musicVolume}
-                                    onChange={(e) => setMusicVolume(parseFloat(e.target.value))}
-                                    disabled={isLoading}
-                                />
-                            </div>
-                        </div>
-                    )}
 
                     <div className="form-actions">
                         <button 

@@ -4,7 +4,6 @@ import '../styles/MainPage.css';
 import axios from 'axios';
 import Header from './Header';
 import ArtificialSpeakerModal from './ArtificialSpeakerModal';
-import BackgroundMusicModal from './BackgroundMusicModal';
 
 function MainPage() {
     const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -26,8 +25,6 @@ function MainPage() {
     
     // Modal states
     const [showArtificialSpeakerModal, setShowArtificialSpeakerModal] = useState(false);
-    const [showBackgroundMusicModal, setShowBackgroundMusicModal] = useState(false);
-    const [selectedConversationForMusic, setSelectedConversationForMusic] = useState(null);
     const [insertAfterIndex, setInsertAfterIndex] = useState(null);
     
     // Final audio preview states
@@ -177,13 +174,6 @@ function MainPage() {
                 formData.append("full_audio", audioBlob, "full_audio.wav");
             }
 
-            // Check if background music should be included
-            const hasBackgroundMusic = texts.some(conv => conv.hasBackgroundMusic);
-            if (hasBackgroundMusic) {
-                formData.append("include_background_music", "true");
-                formData.append("background_music_type", "calm"); // Default or detect from conversations
-            }
-
             // Send request to backend
             const response = await axios.post(apiUrl + '/conversations_modified', formData, {
                 headers: {
@@ -200,8 +190,10 @@ function MainPage() {
                     audioBase64: response.data.modified_audio,
                     audioBlob: finalAudioBlob,
                     duration: response.data.duration_seconds,
-                    hasBackgroundMusic: response.data.has_background_music,
-                    sampleRate: response.data.sample_rate
+                    sampleRate: response.data.sample_rate,
+                    segmentsCloned: response.data.segments_cloned,
+                    segmentsProcessed: response.data.segments_processed,
+                    voiceCloningEnabled: response.data.voice_cloning_enabled
                 });
                 setFinalAudioUrl(finalAudioUrl);
                 setShowFinalAudioPreview(true);
@@ -320,54 +312,6 @@ function MainPage() {
         }
     };
 
-    // Handler for adding background music
-    const handleAddBackgroundMusic = (conversationIndex = null) => {
-        if (conversationIndex !== null) {
-            setSelectedConversationForMusic(texts[conversationIndex]);
-        } else {
-            setSelectedConversationForMusic(null);
-        }
-        setShowBackgroundMusicModal(true);
-    };
-
-    // Apply background music
-    const handleBackgroundMusicApply = async (requestData) => {
-        try {
-            const response = await axios.post(`${apiUrl}/add_background_music`, requestData, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.data && response.data.mixed_audio_base64) {
-                if (selectedConversationForMusic) {
-                    // Update specific conversation with background music
-                    const updatedTexts = [...texts];
-                    const conversationIndex = updatedTexts.findIndex(
-                        conv => conv.conversationKey === selectedConversationForMusic.conversationKey
-                    );
-                    
-                    if (conversationIndex !== -1) {
-                        updatedTexts[conversationIndex].audio_base64 = response.data.mixed_audio_base64;
-                        updatedTexts[conversationIndex].hasBackgroundMusic = true;
-                        updatedTexts[conversationIndex].musicType = response.data.music_type;
-                        setTexts(updatedTexts);
-                    }
-                } else {
-                    // Update full audio with background music
-                    const audioBlob = base64ToBlob(response.data.mixed_audio_base64, 'audio/wav');
-                    const newAudioUrl = URL.createObjectURL(audioBlob);
-                    setAudioUrl(newAudioUrl);
-                }
-
-                console.log('Background music applied:', response.data);
-            }
-        } catch (error) {
-            console.error('Error applying background music:', error);
-            throw error;
-        }
-    };
-
      return (
         <div className="main-page">
             <Header />
@@ -381,13 +325,6 @@ function MainPage() {
                             <source src={audioUrl} type="audio/wav" />
                             Your browser does not support the audio element.
                         </audio>
-                        <button 
-                            className="music-button"
-                            onClick={() => handleAddBackgroundMusic()}
-                            title="Add background music to entire conversation"
-                        >
-                            🎵 Add Background Music
-                        </button>
                     </div>
                 )}
 
@@ -402,7 +339,6 @@ function MainPage() {
                                         <span className={`speaker-label ${conversation.artificial ? 'artificial-speaker' : ''}`}>
                                             Speaker {conversation.speaker}:
                                             {conversation.artificial && <span className="ai-badge">AI</span>}
-                                            {conversation.hasBackgroundMusic && <span className="music-badge">🎵</span>}
                                         </span>
                                         {conversation.textArray.map((item, wordIndex) => (
                                             <span key={wordIndex} style={{ position: "relative" }}>
@@ -434,13 +370,6 @@ function MainPage() {
                                     </div>
                                 </div>
                                 <div className="conversation-actions">
-                                    <button
-                                        className="action-button music-action"
-                                        onClick={() => handleAddBackgroundMusic(textIndex)}
-                                        title="Add background music to this conversation"
-                                    >
-                                        🎵
-                                    </button>
                                     {conversation.audio_base64 && (
                                         <audio 
                                             controls 
@@ -521,8 +450,11 @@ function MainPage() {
                         <div className="audio-info" style={{ marginBottom: "15px" }}>
                             <p><strong>Duration:</strong> {formatDuration(finalAudioData?.duration)}</p>
                             <p><strong>Quality:</strong> {finalAudioData?.sampleRate || 22050} Hz</p>
-                            {finalAudioData?.hasBackgroundMusic && (
-                                <p><strong>Background Music:</strong> ✅ Included</p>
+                            {finalAudioData?.segmentsProcessed && (
+                                <p><strong>Segments:</strong> {finalAudioData.segmentsProcessed} processed</p>
+                            )}
+                            {finalAudioData?.voiceCloningEnabled && finalAudioData?.segmentsCloned > 0 && (
+                                <p><strong>Voice Cloning:</strong> ✅ {finalAudioData.segmentsCloned} segment(s) regenerated</p>
                             )}
                         </div>
 
@@ -559,16 +491,13 @@ function MainPage() {
                             </button>
                         </div>
 
-                        <div className="processing-info" style={{ 
-                            marginTop: "15px", 
-                            fontSize: "12px", 
+                        <div className="processing-info" style={{
+                            marginTop: "15px",
+                            fontSize: "12px",
                             color: "#666",
                             fontStyle: "italic"
                         }}>
                             <p>✅ Audio processed with style preservation and quality enhancement</p>
-                            {finalAudioData?.hasBackgroundMusic && (
-                                <p>🎵 Background music seamlessly integrated</p>
-                            )}
                         </div>
                     </div>
                 )}
@@ -579,14 +508,6 @@ function MainPage() {
                 onClose={() => setShowArtificialSpeakerModal(false)}
                 onSubmit={handleArtificialSpeakerSubmit}
                 conversationHistory={conversations}
-            />
-
-            <BackgroundMusicModal
-                isOpen={showBackgroundMusicModal}
-                onClose={() => setShowBackgroundMusicModal(false)}
-                onApply={handleBackgroundMusicApply}
-                audioData={selectedConversationForMusic?.audio_base64 || full_audio}
-                speakerInfo={selectedConversationForMusic}
             />
         </div>
     );
