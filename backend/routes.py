@@ -7,10 +7,13 @@ from flask import Blueprint, request, jsonify
 
 from backend.models.speech_music_classifier.sm_inference import sm_inference
 from backend.mcp_agents.agent_coordinator import AgentCoordinator
-from backend.models.config import ASSEMBLY_AI_KEY, OPENAI_API_KEY
 
 main = Blueprint('main', __name__)
 socketio = SocketIO()
+
+# Get API keys from environment variables
+ASSEMBLY_AI_KEY = os.environ.get('ASSEMBLY_AI_KEY', '')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # Initialize MCP Agent Coordinator
 agent_coordinator = AgentCoordinator(
