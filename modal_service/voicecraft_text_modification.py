@@ -134,34 +134,25 @@ class VoiceCraftTextModification:
 
         ckpt = torch.load(model_path, map_location='cpu')
 
-        # Import VoiceCraft
+        # Import VoiceCraft and load using HuggingFace approach
         try:
             from models import voicecraft
             print("✓ VoiceCraft module imported successfully")
+
+            # Use HuggingFace from_pretrained instead of manual loading
+            model_name_hf = "pyp1/VoiceCraft_gigaHalfLibri330M_TTSEnhanced_max16s"
+            print(f"Loading model from HuggingFace: {model_name_hf}")
+            self.model = voicecraft.VoiceCraft.from_pretrained(model_name_hf)
+            print("✓ VoiceCraft model loaded successfully")
+
         except Exception as e:
-            print(f"❌ Failed to import VoiceCraft: {e}")
+            print(f"❌ Failed to load VoiceCraft: {e}")
             import traceback
             traceback.print_exc()
             raise
 
-        # Get config
-        if 'config' in ckpt:
-            self.model_args = ckpt['config']
-        else:
-            # Default config for 330M
-            self.model_args = type('Args', (), {
-                'n_codebooks': 8,
-                'codebook_size': 2048,
-                'd_model': 1024,
-                'n_head': 16,
-                'n_layer': 12,
-            })()
-
-        # Create model
-        self.model = voicecraft.VoiceCraft(self.model_args)
-
-        # Load weights
-        if 'model' in ckpt:
+        # Skip manual weight loading (handled by from_pretrained)
+        if False and 'model' in ckpt:
             self.model.load_state_dict(ckpt['model'], strict=False)
         else:
             self.model.load_state_dict(ckpt, strict=False)
