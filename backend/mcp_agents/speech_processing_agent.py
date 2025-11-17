@@ -370,7 +370,12 @@ class SpeechProcessingAgent(MCPAgent):
 
                 is_artificial = conv.get('artificial', False)
                 original_text = conv['original'].get('text', '')
-                modified_text = conv['modified'].get('text', '')
+                modified_text = conv['modified'].get('text', '').strip()
+
+                # Skip segments where all text was removed
+                if not modified_text:
+                    self.logger.info(f"[{conv_key}] Skipping - all text removed by user")
+                    continue
 
                 # Check if this segment was cloned
                 if idx in cloning_results_map:
@@ -379,7 +384,9 @@ class SpeechProcessingAgent(MCPAgent):
                     # Handle exceptions from parallel execution
                     if isinstance(cloning_result, Exception):
                         self.logger.error(f"[{conv_key}] Voice cloning failed with exception: {cloning_result}")
-                        segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
+                        # Skip segment instead of using original audio with wrong text
+                        self.logger.warning(f"[{conv_key}] Skipping segment - cloning failed and text was modified")
+                        continue
                     elif cloning_result.get('success'):
                         # Use cloned audio
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
@@ -387,9 +394,9 @@ class SpeechProcessingAgent(MCPAgent):
                         method = cloning_result['data'].get('method', 'unknown')
                         self.logger.info(f"[{conv_key}] ✓ Voice cloned (method: {method})")
                     else:
-                        # Fallback to original
-                        self.logger.warning(f"[{conv_key}] ✗ Cloning failed: {cloning_result.get('error')}")
-                        segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
+                        # Skip segment instead of using original audio with wrong text
+                        self.logger.warning(f"[{conv_key}] Skipping segment - cloning failed: {cloning_result.get('error')}")
+                        continue
 
                 elif is_artificial:
                     # Use AI-generated audio for artificial speakers
