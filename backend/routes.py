@@ -195,6 +195,17 @@ def modified_transcript():
 
         print(f"[DEBUG] Received {len(conversations_list)} conversations for processing")
 
+        # DEBUG: Print each conversation's text to verify modifications
+        for idx, conv_data in enumerate(conversations_list):
+            conv_key = list(conv_data.keys())[0]
+            conv = conv_data[conv_key]
+            original = conv.get('original', {}).get('text', 'N/A')
+            modified = conv.get('modified', {}).get('text', 'N/A')
+            print(f"[DEBUG] Conv {idx} ({conv_key}):")
+            print(f"  Original: '{original}'")
+            print(f"  Modified: '{modified}'")
+            print(f"  Text changed: {original != modified}")
+
         # Import the speech processing agent
         from backend.mcp_agents.speech_processing_agent import SpeechProcessingAgent
 

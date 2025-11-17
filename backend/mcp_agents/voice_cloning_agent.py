@@ -241,7 +241,10 @@ class VoiceCloningAgent(MCPAgent):
             # ================================================================
 
             if not self.modal_url:
-                logger.warning("Modal URL not configured, using fallback (original audio)")
+                logger.warning("❌ Modal URL not configured, using fallback (original audio)")
+                logger.warning(f"   Set MODAL_VOICECRAFT_URL environment variable to enable voice cloning")
+                logger.warning(f"   Original text: '{original_text}'")
+                logger.warning(f"   Modified text: '{modified_text}'")
                 self.stats['fallbacks'] += 1
                 return self.create_response(True, {
                     "modified_audio_base64": reference_audio_list[0],

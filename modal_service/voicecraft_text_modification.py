@@ -30,7 +30,7 @@ app = modal.App("wavecraft-voicecraft-textmod")
 cache_volume = modal.Volume.from_name("voicecraft-cache-v2", create_if_missing=True)
 
 voicecraft_image = (
-    modal.Image.debian_slim(python_version="3.10")
+    modal.Image.debian_slim(python_version="3.11")
     .apt_install(
         "git", "ffmpeg", "espeak-ng", "libsndfile1", "wget",
     )
@@ -55,7 +55,8 @@ voicecraft_image = (
     )
     .run_commands(
         "cd /root && git clone https://github.com/jasonppy/VoiceCraft.git",
-        # VoiceCraft uses 'master' branch by default
+        # Checkout to March 2024 commit (known working version)
+        "cd /root/VoiceCraft && git checkout 4e05d1a || git checkout HEAD~50",
     )
 )
 
@@ -67,9 +68,9 @@ voicecraft_image = (
     gpu="A10G",
     image=voicecraft_image,
     volumes={"/cache": cache_volume},
-    container_idle_timeout=600,
+    scaledown_window=600,  # Updated from container_idle_timeout
     timeout=180,
-    allow_concurrent_inputs=10,
+    concurrency_limit=10,  # Updated from allow_concurrent_inputs
 )
 class VoiceCraftTextModification:
     """VoiceCraft with working text modification"""
@@ -134,7 +135,14 @@ class VoiceCraftTextModification:
         ckpt = torch.load(model_path, map_location='cpu')
 
         # Import VoiceCraft
-        from models import voicecraft
+        try:
+            from models import voicecraft
+            print("✓ VoiceCraft module imported successfully")
+        except Exception as e:
+            print(f"❌ Failed to import VoiceCraft: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
         # Get config
         if 'config' in ckpt:

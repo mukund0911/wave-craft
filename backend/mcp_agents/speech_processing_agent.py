@@ -316,9 +316,16 @@ class SpeechProcessingAgent(MCPAgent):
                 # Determine if we need voice cloning
                 text_modified = original_text != modified_text
 
+                self.logger.info(f"[{conv_key}] Text modified: {text_modified}, use_voice_cloning: {use_voice_cloning}, artificial: {is_artificial}")
+                self.logger.info(f"[{conv_key}] Original text: '{original_text}'")
+                self.logger.info(f"[{conv_key}] Modified text: '{modified_text}'")
+
                 if text_modified and use_voice_cloning and not is_artificial:
                     # Create voice cloning task
                     reference_audio_list = [seg['audio_base64'] for seg in speaker_segments[speaker]]
+
+                    self.logger.info(f"[{conv_key}] 🔊 VOICE CLONING NEEDED - Text was modified")
+                    self.logger.info(f"[{conv_key}]   Speaker: {speaker}, Reference segments: {len(reference_audio_list)}")
 
                     cloning_request = {
                         "action": "modify_speech",
@@ -334,6 +341,13 @@ class SpeechProcessingAgent(MCPAgent):
                     cloning_indices.append(idx)
 
                     self.logger.info(f"[{conv_key}] Queued for parallel voice cloning (speaker {speaker})")
+                else:
+                    if not text_modified:
+                        self.logger.info(f"[{conv_key}] ⏩ SKIPPING CLONING - Text unchanged")
+                    elif not use_voice_cloning:
+                        self.logger.warning(f"[{conv_key}] ⚠️  CLONING DISABLED - Will use original audio despite text change")
+                    elif is_artificial:
+                        self.logger.info(f"[{conv_key}] ⏩ SKIPPING - Artificial speaker")
 
             # Execute all voice cloning tasks in parallel
             self.logger.info(f"Starting parallel voice cloning for {len(cloning_tasks)} segments...")
@@ -381,21 +395,32 @@ class SpeechProcessingAgent(MCPAgent):
                 if idx in cloning_results_map:
                     cloning_result = cloning_results_map[idx]
 
+                    self.logger.info(f"[{conv_key}] 📊 Processing cloning result...")
+
                     # Handle exceptions from parallel execution
                     if isinstance(cloning_result, Exception):
-                        self.logger.error(f"[{conv_key}] Voice cloning failed with exception: {cloning_result}")
+                        self.logger.error(f"[{conv_key}] ❌ Voice cloning failed with exception: {cloning_result}")
                         # Skip segment instead of using original audio with wrong text
-                        self.logger.warning(f"[{conv_key}] Skipping segment - cloning failed and text was modified")
+                        self.logger.warning(f"[{conv_key}] ⏭️  Skipping segment - cloning failed and text was modified")
                         continue
                     elif cloning_result.get('success'):
                         # Use cloned audio
-                        segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
-                        segments_cloned += 1
                         method = cloning_result['data'].get('method', 'unknown')
-                        self.logger.info(f"[{conv_key}] ✓ Voice cloned (method: {method})")
+                        self.logger.info(f"[{conv_key}] ✅ Voice cloning SUCCESS (method: {method})")
+
+                        # Check if it's actually cloned or fallback
+                        if method in ['fallback_no_modal', 'fallback_modal_error', 'original']:
+                            self.logger.warning(f"[{conv_key}] ⚠️  FALLBACK USED - Modal not available or failed")
+                            self.logger.warning(f"[{conv_key}]   Fallback reason: {cloning_result['data'].get('metadata', {}).get('reason', 'unknown')}")
+                            self.logger.warning(f"[{conv_key}] ⚠️  Using original audio (text modification won't be reflected)")
+                        else:
+                            segments_cloned += 1
+
+                        segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
                     else:
                         # Skip segment instead of using original audio with wrong text
-                        self.logger.warning(f"[{conv_key}] Skipping segment - cloning failed: {cloning_result.get('error')}")
+                        self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
+                        self.logger.warning(f"[{conv_key}] ⏭️  Skipping segment")
                         continue
 
                 elif is_artificial:
