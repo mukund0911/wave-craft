@@ -30,7 +30,7 @@ app = modal.App("wavecraft-voicecraft-textmod")
 cache_volume = modal.Volume.from_name("voicecraft-cache-v2", create_if_missing=True)
 
 voicecraft_image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.debian_slim(python_version="3.10")
     .apt_install(
         "git", "ffmpeg", "espeak-ng", "libsndfile1", "wget",
     )
@@ -55,8 +55,10 @@ voicecraft_image = (
     )
     .run_commands(
         "cd /root && git clone https://github.com/jasonppy/VoiceCraft.git",
-        # Checkout to March 2024 commit (known working version)
-        "cd /root/VoiceCraft && git checkout 4e05d1a || git checkout HEAD~50",
+        # Fix audiocraft config issue (from notebook cell 5)
+        "cd /root && git clone https://github.com/facebookresearch/audiocraft.git",
+        "mv /root/audiocraft/config /usr/local/lib/python3.10/site-packages/ || true",
+        "rm -rf /root/audiocraft",
     )
 )
 
@@ -134,15 +136,23 @@ class VoiceCraftTextModification:
 
         ckpt = torch.load(model_path, map_location='cpu')
 
-        # Import VoiceCraft and load using HuggingFace approach
+        # Import VoiceCraft (matching notebook approach)
         try:
+            from models import voicecraft
+            # Reload module (from notebook cell 6)
+            import importlib
+            importlib.reload(voicecraft)
             from models import voicecraft
             print("✓ VoiceCraft module imported successfully")
 
-            # Use HuggingFace from_pretrained instead of manual loading
-            model_name_hf = "pyp1/VoiceCraft_gigaHalfLibri330M_TTSEnhanced_max16s"
-            print(f"Loading model from HuggingFace: {model_name_hf}")
-            self.model = voicecraft.VoiceCraft.from_pretrained(model_name_hf)
+            # Manual model loading (matching notebook cell 6)
+            model = voicecraft.VoiceCraft(ckpt["config"])
+            print("✓ VoiceCraft model instantiated successfully")
+
+            model.load_state_dict(ckpt["model"])
+            model.to(self.device)
+            model.eval()
+            self.model = model
             print("✓ VoiceCraft model loaded successfully")
 
         except Exception as e:
@@ -151,7 +161,7 @@ class VoiceCraftTextModification:
             traceback.print_exc()
             raise
 
-        # Skip manual weight loading (handled by from_pretrained)
+        # Skip duplicate weight loading
         if False and 'model' in ckpt:
             self.model.load_state_dict(ckpt['model'], strict=False)
         else:
