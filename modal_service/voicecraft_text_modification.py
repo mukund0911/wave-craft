@@ -395,10 +395,6 @@ class VoiceCraftTextModification:
             gen_audio = gen_sample[0].cpu()
 
             print(f"✓ Decoded ({time.time()-t0:.2f}s)")
-            print(f"  Concat audio shape: {concat_audio.shape}")
-            print(f"  Generated audio shape: {gen_audio.shape}")
-            print(f"  Generated audio min/max: {gen_audio.min():.4f} / {gen_audio.max():.4f}")
-            print(f"  Generated audio mean: {gen_audio.mean():.4f}")
 
             # ============================================================
             # POST-PROCESSING
@@ -446,10 +442,6 @@ class VoiceCraftTextModification:
 
             print("\n" + "="*70)
             print(f"✓✓✓ VOICECRAFT COMPLETE - {total_time:.2f}s ✓✓✓")
-            print(f"  Generated audio duration: {len(output_seg)/1000:.2f}s")
-            print(f"  Generated audio base64 length: {len(output_b64)} chars")
-            print(f"  Concatenated audio duration: {len(concat_seg)/1000:.2f}s")
-            print(f"  Concatenated audio base64 length: {len(concat_b64)} chars")
             print("="*70)
 
             return {

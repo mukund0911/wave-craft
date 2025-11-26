@@ -62,8 +62,8 @@ class VoiceCloningAgent(MCPAgent):
         self.config = {
             'reference_duration_target': 10.0,  # Target duration in seconds
             'reference_duration_min': 6.0,      # Minimum duration in seconds
-            'sample_rate': 16000,                # VoiceCraft native sample rate (updated to official spec)
-            'timeout': 180,                      # API timeout in seconds (matches Modal service)
+            'sample_rate': 24000,                # VoiceCraft native sample rate
+            'timeout': 120,                      # API timeout in seconds
             'enable_quality_selection': True,    # Use smart reference selection
         }
 
@@ -262,26 +262,6 @@ class VoiceCloningAgent(MCPAgent):
 
                 inference_start = time.time()
 
-                # VoiceCraft constraint: prompt + generation <= 16 seconds
-                MAX_TOTAL_DURATION = 16.0
-
-                # If reference audio is too long, clip it
-                if reference_duration > MAX_TOTAL_DURATION:
-                    logger.warning(f"Reference audio ({reference_duration:.1f}s) exceeds VoiceCraft max ({MAX_TOTAL_DURATION}s)")
-                    logger.warning(f"Clipping to first {MAX_TOTAL_DURATION}s")
-                    # Trim the reference audio to max duration
-                    combined_reference = combined_reference[:int(MAX_TOTAL_DURATION * 1000)]  # AudioSegment uses milliseconds
-                    reference_duration = MAX_TOTAL_DURATION
-                    reference_b64 = self._audio_to_base64(combined_reference)
-
-                # For speech editing without MFA: Use 50% as prompt, 50% for generation
-                # This approximates the original segment duration
-                # Ideally we'd use MFA to find exact word boundaries, but this is a reasonable compromise
-                cut_off_sec = reference_duration * 0.5  # Use first half as prompt
-
-                logger.info(f"VoiceCraft setup: {cut_off_sec:.1f}s prompt + {cut_off_sec:.1f}s generation = {reference_duration:.1f}s total")
-                logger.info(f"  Note: Without MFA, duration may not match exactly")
-
                 # Make async request to Modal
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
@@ -291,11 +271,7 @@ class VoiceCloningAgent(MCPAgent):
                             "reference_audio_b64": reference_b64,
                             "original_text": original_text,
                             "modified_text": modified_text,
-                            "cut_off_sec": cut_off_sec,  # Tell VoiceCraft where to split
-                            "codec_audio_sr": self.config['sample_rate'],  # Updated param name for official VoiceCraft
-                            "sample_batch_size": 2,  # Generate 2 samples, pick best
-                            "top_p": 0.8,  # Nucleus sampling (official recommendation)
-                            "seed": 1  # Reproducibility
+                            "sample_rate": self.config['sample_rate']
                         },
                         timeout=self.config['timeout']
                     )
@@ -316,48 +292,8 @@ class VoiceCloningAgent(MCPAgent):
                     raise Exception(f"Inference failed: {error_msg}")
 
                 # Success!
-                # Use concatenated audio (prompt + generated) instead of just generated
-                # because without MFA, we use entire audio as prompt and generate very little
-                modified_audio_b64 = result.get('concat_audio_b64', result.get('audio_b64', ''))
+                modified_audio_b64 = result['audio_b64']
                 modal_metadata = result.get('metadata', {})
-
-                # 🔍 DEBUG: Check what Modal returned
-                logger.info(f"📊 Modal Response Debug:")
-                logger.info(f"   Success: {result.get('success')}")
-                logger.info(f"   Audio B64 length: {len(modified_audio_b64)} chars")
-                logger.info(f"   Audio B64 first 100 chars: {modified_audio_b64[:100]}")
-                logger.info(f"   Has concat_audio_b64: {'concat_audio_b64' in result}")
-                if 'concat_audio_b64' in result:
-                    logger.info(f"   Concat audio B64 length: {len(result.get('concat_audio_b64', ''))} chars")
-                logger.info(f"   Metadata: {modal_metadata}")
-
-                # Save raw response to debug file
-                try:
-                    import tempfile
-                    import json
-                    debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_debug")
-                    os.makedirs(debug_dir, exist_ok=True)
-
-                    # Save response (without huge base64 strings)
-                    debug_response = result.copy()
-                    if 'audio_b64' in debug_response:
-                        debug_response['audio_b64'] = f"<{len(debug_response['audio_b64'])} chars>"
-                    if 'concat_audio_b64' in debug_response:
-                        debug_response['concat_audio_b64'] = f"<{len(debug_response['concat_audio_b64'])} chars>"
-
-                    response_file = os.path.join(debug_dir, f"modal_response_{speaker_id}.json")
-                    with open(response_file, 'w') as f:
-                        json.dump(debug_response, f, indent=2)
-                    logger.info(f"   Saved response to: {response_file}")
-                except Exception as e:
-                    logger.warning(f"Failed to save response debug file: {e}")
-
-                # Check if audio is actually empty
-                if not modified_audio_b64 or len(modified_audio_b64) < 100:
-                    logger.error(f"❌ Modal returned empty or invalid audio!")
-                    logger.error(f"   Full response keys: {result.keys()}")
-                    logger.error(f"   Full response: {result}")
-                    raise Exception("Modal returned empty audio")
 
                 self.stats['successful_clones'] += 1
                 self.stats['total_inference_time'] += inference_time

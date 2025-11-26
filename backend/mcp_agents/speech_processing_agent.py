@@ -272,29 +272,6 @@ class SpeechProcessingAgent(MCPAgent):
             self.logger.info(f"Generating final audio for {len(conversations)} conversations")
             self.logger.info(f"Voice cloning enabled: {use_voice_cloning}")
 
-            # DEBUG: Show conversation order as received
-            self.logger.info("="*70)
-            self.logger.info("CONVERSATION ORDER (as received from frontend):")
-            for idx, conv_data in enumerate(conversations):
-                conv_key = list(conv_data.keys())[0]
-                conv = conv_data[conv_key]
-
-                # Check multiple possible locations for speaker field
-                speaker = (conv.get('speaker') or
-                          conv.get('original', {}).get('speaker') or
-                          'unknown')
-
-                text_preview = conv.get('original', {}).get('text', '')[:50]
-
-                # DEBUG: Show full conv structure for first item
-                if idx == 0:
-                    self.logger.info(f"  CONV STRUCTURE DEBUG: {list(conv.keys())}")
-                    if 'original' in conv:
-                        self.logger.info(f"  ORIGINAL KEYS: {list(conv['original'].keys())}")
-
-                self.logger.info(f"  {idx}: {conv_key} (Speaker {speaker}): {text_preview}...")
-            self.logger.info("="*70)
-
             # ================================================================
             # STEP 1: Group conversations by speaker to collect reference audio
             # ================================================================
@@ -345,13 +322,10 @@ class SpeechProcessingAgent(MCPAgent):
 
                 if text_modified and use_voice_cloning and not is_artificial:
                     # Create voice cloning task
-                    # CRITICAL: Use ONLY current segment to avoid duration mismatch
-                    # VoiceCraft returns 16s when we combine segments, but we only want current segment's duration
-                    reference_audio_list = [conv['original']['speaker_audio']]
+                    reference_audio_list = [seg['audio_base64'] for seg in speaker_segments[speaker]]
 
                     self.logger.info(f"[{conv_key}] 🔊 VOICE CLONING NEEDED - Text was modified")
-                    self.logger.info(f"[{conv_key}]   Speaker: {speaker}")
-                    self.logger.info(f"[{conv_key}]   Using ONLY current segment as reference (no combining)")
+                    self.logger.info(f"[{conv_key}]   Speaker: {speaker}, Reference segments: {len(reference_audio_list)}")
 
                     cloning_request = {
                         "action": "modify_speech",
@@ -404,10 +378,6 @@ class SpeechProcessingAgent(MCPAgent):
                 conv_key = list(conv_data.keys())[0]
                 conv = conv_data[conv_key]
 
-                self.logger.info(f"\n{'='*70}")
-                self.logger.info(f"[{conv_key}] Processing segment {idx+1}/{len(conversations)}")
-                self.logger.info(f"{'='*70}")
-
                 if 'speaker_audio' not in conv.get('original', {}):
                     self.logger.warning(f"No speaker audio found for {conv_key}")
                     continue
@@ -415,20 +385,13 @@ class SpeechProcessingAgent(MCPAgent):
                 is_artificial = conv.get('artificial', False)
                 original_text = conv['original'].get('text', '')
                 modified_text = conv['modified'].get('text', '').strip()
-                speaker = conv.get('speaker', 'unknown')  # FIXED: speaker is at root level, not in 'original'
-
-                self.logger.info(f"[{conv_key}] Speaker: {speaker}")
-                self.logger.info(f"[{conv_key}] Original text: '{original_text[:100]}...'")
-                self.logger.info(f"[{conv_key}] Modified text: '{modified_text[:100]}...'")
 
                 # Skip segments where all text was removed
                 if not modified_text:
-                    self.logger.info(f"[{conv_key}] ⏭️  SKIPPING - all text removed by user")
+                    self.logger.info(f"[{conv_key}] Skipping - all text removed by user")
                     continue
 
                 # Check if this segment was cloned
-                self.logger.info(f"[{conv_key}] Checking if segment was cloned (idx={idx}, in map: {idx in cloning_results_map})")
-
                 if idx in cloning_results_map:
                     cloning_result = cloning_results_map[idx]
 
@@ -454,46 +417,6 @@ class SpeechProcessingAgent(MCPAgent):
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
-
-                        # 🔍 DEBUG: Save cloned audio to temporary file
-                        try:
-                            import os
-                            import tempfile
-                            import re
-
-                            # Create temp directory if it doesn't exist
-                            debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_debug")
-                            os.makedirs(debug_dir, exist_ok=True)
-
-                            # Clean text for filename (keep first 30 chars, safe characters only)
-                            def clean_for_filename(text):
-                                text = re.sub(r'[^\w\s-]', '', text)[:30]
-                                return re.sub(r'\s+', '_', text)
-
-                            orig_clean = clean_for_filename(original_text)
-                            mod_clean = clean_for_filename(modified_text)
-
-                            # Save cloned audio
-                            debug_filename = f"{conv_key}_cloned_{method}.wav"
-                            debug_path = os.path.join(debug_dir, debug_filename)
-                            segment_audio.export(debug_path, format="wav")
-
-                            # Also save metadata as text file
-                            metadata_path = os.path.join(debug_dir, f"{conv_key}_metadata.txt")
-                            with open(metadata_path, 'w', encoding='utf-8') as f:
-                                f.write(f"Segment: {conv_key}\n")
-                                f.write(f"Method: {method}\n")
-                                f.write(f"Speaker: {conv.get('original', {}).get('speaker', 'unknown')}\n")
-                                f.write(f"\nOriginal text:\n{original_text}\n")
-                                f.write(f"\nModified text:\n{modified_text}\n")
-                                f.write(f"\nCloning metadata:\n{cloning_result.get('data', {}).get('metadata', {})}\n")
-
-                            self.logger.info(f"[{conv_key}] 💾 DEBUG: Saved cloned audio to {debug_path}")
-                            self.logger.info(f"[{conv_key}] 📝 DEBUG: Saved metadata to {metadata_path}")
-
-                        except Exception as e:
-                            self.logger.warning(f"[{conv_key}] Failed to save debug file: {e}")
-
                     else:
                         # Skip segment instead of using original audio with wrong text
                         self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
@@ -510,62 +433,14 @@ class SpeechProcessingAgent(MCPAgent):
                     self.logger.info(f"[{conv_key}] Using original audio")
                     segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
 
-                    # 🔍 DEBUG: Save original audio to temporary file
-                    try:
-                        import os
-                        import tempfile
-                        debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_debug")
-                        os.makedirs(debug_dir, exist_ok=True)
-
-                        debug_filename = f"{conv_key}_original.wav"
-                        debug_path = os.path.join(debug_dir, debug_filename)
-                        segment_audio.export(debug_path, format="wav")
-
-                        metadata_path = os.path.join(debug_dir, f"{conv_key}_metadata.txt")
-                        with open(metadata_path, 'w', encoding='utf-8') as f:
-                            f.write(f"Segment: {conv_key}\n")
-                            f.write(f"Method: original (text unchanged)\n")
-                            f.write(f"Speaker: {conv.get('original', {}).get('speaker', 'unknown')}\n")
-                            f.write(f"\nText:\n{original_text}\n")
-
-                        self.logger.info(f"[{conv_key}] 💾 DEBUG: Saved original audio to {debug_path}")
-
-                    except Exception as e:
-                        self.logger.warning(f"[{conv_key}] Failed to save debug file: {e}")
-
                 # Add silence between segments for natural flow
                 if len(final_audio) > 0:
                     final_audio += AudioSegment.silent(duration=500)  # 0.5 second gap
-                    self.logger.info(f"[{conv_key}] Added 0.5s silence gap")
 
-                segment_duration = len(segment_audio) / 1000.0
                 final_audio += segment_audio
                 segments_processed += 1
 
-                self.logger.info(f"[{conv_key}] ✅ ADDED TO FINAL AUDIO (duration: {segment_duration:.2f}s, total now: {len(final_audio)/1000.0:.2f}s)")
-                self.logger.info(f"[{conv_key}] Segments processed so far: {segments_processed}")
-
             self.logger.info(f"Processed {segments_processed} segments, cloned {segments_cloned}")
-
-            # ================================================================
-            # DEBUG SUMMARY
-            # ================================================================
-            try:
-                import os
-                import tempfile
-                debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_debug")
-                if os.path.exists(debug_dir):
-                    debug_files = [f for f in os.listdir(debug_dir) if f.endswith('.wav') or f.endswith('.txt')]
-                    if debug_files:
-                        self.logger.info("="*70)
-                        self.logger.info("🔍 DEBUG FILES SAVED:")
-                        self.logger.info(f"   Location: {debug_dir}")
-                        self.logger.info(f"   Files: {len(debug_files)} files")
-                        for f in sorted(debug_files):
-                            self.logger.info(f"     - {f}")
-                        self.logger.info("="*70)
-            except Exception as e:
-                pass  # Silently ignore debug summary errors
 
             # ================================================================
             # STEP 4: Apply audio enhancements for quality
