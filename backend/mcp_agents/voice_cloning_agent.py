@@ -22,7 +22,7 @@ import base64
 import os
 import requests
 from io import BytesIO
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from pydub import AudioSegment
 from .base_agent import MCPAgent
 import logging
@@ -237,7 +237,14 @@ class VoiceCloningAgent(MCPAgent):
             reference_b64 = self._audio_to_base64(combined_reference)
 
             # ================================================================
-            # 5. CALL MODAL API
+            # 5. DETECT EDIT TYPE
+            # ================================================================
+
+            edit_type = self._detect_edit_type(original_text, modified_text)
+            logger.info(f"Edit type detected: {edit_type or 'TTS (no edit)'}")
+
+            # ================================================================
+            # 6. CALL MODAL API
             # ================================================================
 
             if not self.modal_url:
@@ -259,6 +266,7 @@ class VoiceCloningAgent(MCPAgent):
 
             try:
                 logger.info(f"Calling Modal API: {self.modal_url}")
+                logger.info(f"Using MFA-based {'Edit Mode' if edit_type else 'TTS Mode'}")
 
                 inference_start = time.time()
 
@@ -274,29 +282,39 @@ class VoiceCloningAgent(MCPAgent):
                     reference_duration = MAX_TOTAL_DURATION
                     reference_b64 = self._audio_to_base64(combined_reference)
 
-                # For speech editing without MFA: Use 50% as prompt, 50% for generation
-                # This approximates the original segment duration
-                # Ideally we'd use MFA to find exact word boundaries, but this is a reasonable compromise
-                cut_off_sec = reference_duration * 0.5  # Use first half as prompt
+                # Prepare request based on mode
+                request_json = {
+                    "reference_audio_b64": reference_b64,
+                    "original_text": original_text,
+                    "modified_text": modified_text,
+                    "codec_audio_sr": self.config['sample_rate'],
+                    "sample_batch_size": 2,  # Generate 2 samples, pick best
+                    "top_p": 0.8,  # Nucleus sampling
+                    "seed": 1  # Reproducibility
+                }
 
-                logger.info(f"VoiceCraft setup: {cut_off_sec:.1f}s prompt + {cut_off_sec:.1f}s generation = {reference_duration:.1f}s total")
-                logger.info(f"  Note: Without MFA, duration may not match exactly")
+                # Add edit-specific or TTS-specific parameters
+                if edit_type:
+                    # EDIT MODE: Let MFA calculate mask_interval on Modal
+                    request_json["edit_type"] = edit_type
+                    request_json["use_mfa"] = True
+                    request_json["left_margin"] = 0.08
+                    request_json["right_margin"] = 0.08
+                    logger.info(f"  Edit mode: {edit_type}")
+                else:
+                    # TTS MODE: Use MFA to find word boundary for cutoff
+                    # Let Modal calculate the exact cutoff using MFA
+                    cut_off_sec = reference_duration * 0.5
+                    request_json["cut_off_sec"] = cut_off_sec
+                    request_json["use_mfa"] = True  # Use MFA to snap to word boundary
+                    logger.info(f"  TTS mode: {cut_off_sec:.1f}s prompt")
 
                 # Make async request to Modal
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: requests.post(
                         f"{self.modal_url}/clone",
-                        json={
-                            "reference_audio_b64": reference_b64,
-                            "original_text": original_text,
-                            "modified_text": modified_text,
-                            "cut_off_sec": cut_off_sec,  # Tell VoiceCraft where to split
-                            "codec_audio_sr": self.config['sample_rate'],  # Updated param name for official VoiceCraft
-                            "sample_batch_size": 2,  # Generate 2 samples, pick best
-                            "top_p": 0.8,  # Nucleus sampling (official recommendation)
-                            "seed": 1  # Reproducibility
-                        },
+                        json=request_json,
                         timeout=self.config['timeout']
                     )
                 )
@@ -434,6 +452,37 @@ class VoiceCloningAgent(MCPAgent):
         audio_segment.export(buffer, format="wav")
         audio_bytes = buffer.getvalue()
         return base64.b64encode(audio_bytes).decode('utf-8')
+
+    def _detect_edit_type(self, original: str, modified: str) -> Optional[str]:
+        """
+        Detect edit type between original and modified text
+
+        Args:
+            original: Original text
+            modified: Modified text
+
+        Returns:
+            "insertion", "deletion", "substitution", or None (no change or TTS)
+        """
+        orig_words = original.strip().split()
+        mod_words = modified.strip().split()
+
+        if not orig_words or not mod_words:
+            return None
+
+        if original == modified:
+            return None  # No change
+
+        # Detect type based on word count change
+        if len(mod_words) > len(orig_words):
+            return "insertion"
+        elif len(mod_words) < len(orig_words):
+            return "deletion"
+        elif len(mod_words) == len(orig_words):
+            # Same length but different words = substitution
+            return "substitution"
+        else:
+            return None
 
     def get_stats(self) -> Dict[str, Any]:
         """
