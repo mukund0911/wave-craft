@@ -378,6 +378,9 @@ class SpeechProcessingAgent(MCPAgent):
                 conv_key = list(conv_data.keys())[0]
                 conv = conv_data[conv_key]
 
+                # DEBUG: Track assembly order
+                self.logger.info(f"🔢 ASSEMBLING idx={idx}, conv_key={conv_key}, position in final audio: {len(final_audio)/1000:.2f}s")
+
                 if 'speaker_audio' not in conv.get('original', {}):
                     self.logger.warning(f"No speaker audio found for {conv_key}")
                     continue
@@ -447,8 +450,12 @@ class SpeechProcessingAgent(MCPAgent):
                 if len(final_audio) > 0:
                     final_audio += AudioSegment.silent(duration=500)  # 0.5 second gap
 
+                segment_duration = len(segment_audio) / 1000.0
                 final_audio += segment_audio
                 segments_processed += 1
+
+                # DEBUG: Confirm what was added
+                self.logger.info(f"✅ ADDED {conv_key} to final audio: duration={segment_duration:.2f}s, new total={len(final_audio)/1000:.2f}s")
 
             self.logger.info(f"Processed {segments_processed} segments, cloned {segments_cloned}")
 
