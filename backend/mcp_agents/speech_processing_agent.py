@@ -273,6 +273,19 @@ class SpeechProcessingAgent(MCPAgent):
             self.logger.info(f"Voice cloning enabled: {use_voice_cloning}")
 
             # ================================================================
+            # DEBUG: Log conversation order as received
+            # ================================================================
+            self.logger.info("="*70)
+            self.logger.info("CONVERSATION ORDER (as received from frontend):")
+            for idx, conv_data in enumerate(conversations):
+                conv_key = list(conv_data.keys())[0]
+                conv = conv_data[conv_key]
+                speaker = conv.get('speaker', 'unknown')
+                text_preview = conv.get('original', {}).get('text', '')[:50]
+                self.logger.info(f"  [{idx}] {conv_key} - Speaker {speaker}: {text_preview}...")
+            self.logger.info("="*70)
+
+            # ================================================================
             # STEP 1: Group conversations by speaker to collect reference audio
             # ================================================================
 
@@ -370,6 +383,10 @@ class SpeechProcessingAgent(MCPAgent):
             # STEP 3: Assemble final audio (sequential, order matters)
             # ================================================================
 
+            self.logger.info("="*70)
+            self.logger.info("ASSEMBLING FINAL AUDIO (in order):")
+            self.logger.info("="*70)
+
             final_audio = AudioSegment.silent(duration=0)
             segments_processed = 0
             segments_cloned = 0
@@ -378,8 +395,11 @@ class SpeechProcessingAgent(MCPAgent):
                 conv_key = list(conv_data.keys())[0]
                 conv = conv_data[conv_key]
 
+                speaker = conv.get('speaker', 'unknown')
+                self.logger.info(f"\n[{idx}] Processing {conv_key} (Speaker {speaker})...")
+
                 if 'speaker_audio' not in conv.get('original', {}):
-                    self.logger.warning(f"No speaker audio found for {conv_key}")
+                    self.logger.warning(f"  ⏭️  SKIPPED {conv_key} - No speaker audio found")
                     continue
 
                 is_artificial = conv.get('artificial', False)
@@ -388,7 +408,7 @@ class SpeechProcessingAgent(MCPAgent):
 
                 # Skip segments where all text was removed
                 if not modified_text:
-                    self.logger.info(f"[{conv_key}] Skipping - all text removed by user")
+                    self.logger.info(f"  ⏭️  SKIPPED {conv_key} - All text removed by user")
                     continue
 
                 # Check if this segment was cloned
@@ -396,39 +416,47 @@ class SpeechProcessingAgent(MCPAgent):
                     cloning_result = cloning_results_map[idx]
 
                     if isinstance(cloning_result, Exception):
-                        self.logger.error(f"[{conv_key}] Voice cloning failed: {cloning_result}")
+                        self.logger.error(f"  ❌ Voice cloning failed with exception: {cloning_result}")
+                        self.logger.warning(f"  ⏭️  SKIPPED {conv_key} - Cloning failed")
                         continue
                     elif cloning_result.get('success'):
                         method = cloning_result['data'].get('method', 'unknown')
 
                         if method in ['fallback_no_modal', 'fallback_modal_error', 'original']:
-                            self.logger.warning(f"[{conv_key}] Fallback used - text modifications not reflected")
+                            self.logger.warning(f"  ⚠️  Fallback used - text modifications not reflected (method: {method})")
                         else:
+                            self.logger.info(f"  ✅ Voice cloning SUCCESS (method: {method})")
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
                     else:
-                        self.logger.error(f"[{conv_key}] Cloning failed: {cloning_result.get('error')}")
+                        self.logger.error(f"  ❌ Cloning failed: {cloning_result.get('error')}")
+                        self.logger.warning(f"  ⏭️  SKIPPED {conv_key} - Cloning failed")
                         continue
 
                 elif is_artificial:
                     # Use AI-generated audio for artificial speakers
-                    self.logger.info(f"[{conv_key}] Using AI-generated audio")
+                    self.logger.info(f"  🤖 Using AI-generated audio")
                     segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
 
                 else:
                     # Use original audio (text unchanged)
-                    self.logger.info(f"[{conv_key}] Using original audio")
+                    self.logger.info(f"  📼 Using original audio (text unchanged)")
                     segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
 
                 # Add silence between segments for natural flow
                 if len(final_audio) > 0:
                     final_audio += AudioSegment.silent(duration=500)  # 0.5 second gap
 
+                segment_duration = len(segment_audio) / 1000.0
                 final_audio += segment_audio
                 segments_processed += 1
 
-            self.logger.info(f"Processed {segments_processed} segments, cloned {segments_cloned}")
+                self.logger.info(f"  ✅ ADDED {conv_key} to final audio (duration: {segment_duration:.2f}s, total: {len(final_audio)/1000.0:.2f}s)")
+
+            self.logger.info("="*70)
+            self.logger.info(f"✓ Processed {segments_processed} segments, cloned {segments_cloned}")
+            self.logger.info("="*70)
 
             # ================================================================
             # STEP 4: Apply audio enhancements for quality

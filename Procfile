@@ -1,1 +1,1 @@
-web: gunicorn "backend:create_app()"
+web: gunicorn "backend:create_app()" --timeout 120 --workers 1 --threads 2 --worker-class gthread
