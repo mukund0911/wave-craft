@@ -426,10 +426,31 @@ class SpeechProcessingAgent(MCPAgent):
                         original_dur = len(original_audio_seg) / 1000.0
                         cloned_dur = len(segment_audio) / 1000.0
                         dur_diff = original_dur - cloned_dur
+
+                        # Check if audio is actually silent (amplitude check)
+                        import numpy as np
+                        audio_array = np.array(segment_audio.get_array_of_samples())
+                        max_amplitude = np.max(np.abs(audio_array))
+                        rms = np.sqrt(np.mean(audio_array**2))
+
                         self.logger.info(f"[{conv_key}] 🎵 Audio Duration Comparison:")
                         self.logger.info(f"[{conv_key}]   Original: {original_dur:.2f}s")
                         self.logger.info(f"[{conv_key}]   Cloned: {cloned_dur:.2f}s")
                         self.logger.info(f"[{conv_key}]   Difference: {dur_diff:.2f}s ({'shorter' if dur_diff > 0 else 'longer'} after cloning)")
+                        self.logger.info(f"[{conv_key}]   Max amplitude: {max_amplitude}, RMS: {rms:.2f}")
+
+                        if max_amplitude < 100:
+                            self.logger.warning(f"[{conv_key}] ⚠️  CLONED AUDIO IS NEARLY SILENT! (max_amp={max_amplitude})")
+                            self.logger.warning(f"[{conv_key}]   This segment will be inaudible in final audio!")
+
+                        # Check sample rate compatibility
+                        self.logger.info(f"[{conv_key}]   Sample rate: {segment_audio.frame_rate}Hz, Channels: {segment_audio.channels}")
+                        self.logger.info(f"[{conv_key}]   Original sample rate: {original_audio_seg.frame_rate}Hz")
+
+                        # CRITICAL: Ensure sample rate matches for concatenation
+                        if segment_audio.frame_rate != original_audio_seg.frame_rate:
+                            self.logger.warning(f"[{conv_key}] ⚠️  Sample rate mismatch! Converting {segment_audio.frame_rate}Hz → {original_audio_seg.frame_rate}Hz")
+                            segment_audio = segment_audio.set_frame_rate(original_audio_seg.frame_rate)
                     else:
                         # Skip segment instead of using original audio with wrong text
                         self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
