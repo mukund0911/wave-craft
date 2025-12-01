@@ -397,6 +397,16 @@ class SpeechProcessingAgent(MCPAgent):
             self.logger.info("ASSEMBLING FINAL AUDIO (in order):")
             self.logger.info("="*70)
 
+            # Create temporary directory for intermediate audio files
+            import tempfile
+            import os
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_assembly", timestamp)
+            os.makedirs(debug_dir, exist_ok=True)
+            self.logger.info(f"💾 Saving intermediate audio files to: {debug_dir}")
+
             final_audio = AudioSegment.silent(duration=0)
             segments_processed = 0
             segments_cloned = 0
@@ -467,11 +477,31 @@ class SpeechProcessingAgent(MCPAgent):
                     self.logger.info(f"  📼 Using original audio (text unchanged)")
                     segment_audio = self._byte_to_wav(conv['original']['speaker_audio'])
 
+                # Save intermediate audio file for debugging
+                try:
+                    segment_duration = len(segment_audio) / 1000.0
+
+                    # Determine source type for filename
+                    if idx in cloning_results_map:
+                        source_type = "cloned"
+                    elif is_artificial:
+                        source_type = "artificial"
+                    else:
+                        source_type = "original"
+
+                    # Save segment audio
+                    segment_filename = f"{idx:02d}_{conv_key}_{source_type}_{segment_duration:.2f}s.wav"
+                    segment_path = os.path.join(debug_dir, segment_filename)
+                    segment_audio.export(segment_path, format="wav")
+
+                    self.logger.info(f"  💾 Saved: {segment_filename}")
+                except Exception as e:
+                    self.logger.warning(f"  Failed to save intermediate file: {e}")
+
                 # Add silence between segments for natural flow
                 if len(final_audio) > 0:
                     final_audio += AudioSegment.silent(duration=500)  # 0.5 second gap
 
-                segment_duration = len(segment_audio) / 1000.0
                 final_audio += segment_audio
                 segments_processed += 1
 
@@ -480,6 +510,45 @@ class SpeechProcessingAgent(MCPAgent):
             self.logger.info("="*70)
             self.logger.info(f"✓ Processed {segments_processed} segments, cloned {segments_cloned}")
             self.logger.info("="*70)
+
+            # Save final assembled audio (before enhancement)
+            try:
+                final_duration = len(final_audio) / 1000.0
+                final_filename = f"FINAL_assembled_{final_duration:.2f}s.wav"
+                final_path = os.path.join(debug_dir, final_filename)
+                final_audio.export(final_path, format="wav")
+                self.logger.info(f"💾 Saved final assembled audio: {final_filename}")
+
+                # Save metadata file
+                import json
+                metadata = {
+                    "timestamp": timestamp,
+                    "total_segments": segments_processed,
+                    "cloned_segments": segments_cloned,
+                    "final_duration_seconds": final_duration,
+                    "assembly_order": []
+                }
+
+                # Document each conversation that was processed
+                for i, conv_data in enumerate(conversations):
+                    conv_key = list(conv_data.keys())[0]
+                    conv = conv_data[conv_key]
+                    if i < segments_processed:  # Only include processed segments
+                        metadata["assembly_order"].append({
+                            "index": i,
+                            "conv_key": conv_key,
+                            "speaker": conv.get('speaker', 'unknown'),
+                            "original_text": conv.get('original', {}).get('text', '')[:100],
+                            "modified_text": conv.get('modified', {}).get('text', '')[:100]
+                        })
+
+                metadata_path = os.path.join(debug_dir, "ASSEMBLY_INFO.json")
+                with open(metadata_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                self.logger.info(f"💾 Saved assembly metadata: ASSEMBLY_INFO.json")
+
+            except Exception as e:
+                self.logger.warning(f"Failed to save final assembled audio: {e}")
 
             # ================================================================
             # STEP 4: Apply audio enhancements for quality
