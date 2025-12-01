@@ -439,6 +439,19 @@ class SpeechProcessingAgent(MCPAgent):
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
+
+                        # Compare original vs cloned
+                        original_audio = self._byte_to_wav(conv['original']['speaker_audio'])
+                        original_duration = len(original_audio) / 1000.0
+                        cloned_duration = len(segment_audio) / 1000.0
+                        original_text_len = len(original_text)
+                        modified_text_len = len(modified_text)
+
+                        self.logger.info(f"  📊 COMPARISON:")
+                        self.logger.info(f"     Original: {original_duration:.2f}s audio, {original_text_len} chars text")
+                        self.logger.info(f"     Cloned:   {cloned_duration:.2f}s audio, {modified_text_len} chars text")
+                        self.logger.info(f"     Δ Audio:  {cloned_duration - original_duration:+.2f}s ({(cloned_duration/original_duration - 1)*100:+.1f}%)")
+                        self.logger.info(f"     Δ Text:   {modified_text_len - original_text_len:+d} chars ({(modified_text_len/original_text_len - 1)*100:+.1f}%)")
                     else:
                         self.logger.error(f"  ❌ Cloning failed: {cloning_result.get('error')}")
                         self.logger.warning(f"  ⏭️  SKIPPED {conv_key} - Cloning failed")
