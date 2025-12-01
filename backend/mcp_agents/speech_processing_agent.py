@@ -335,10 +335,20 @@ class SpeechProcessingAgent(MCPAgent):
 
                 if text_modified and use_voice_cloning and not is_artificial:
                     # Create voice cloning task
-                    reference_audio_list = [seg['audio_base64'] for seg in speaker_segments[speaker]]
+                    # CRITICAL: Exclude the current segment from reference audio to avoid duplication
+                    reference_audio_list = [
+                        seg['audio_base64']
+                        for seg in speaker_segments[speaker]
+                        if seg['conv_key'] != conv_key  # Don't use current segment as its own reference
+                    ]
 
                     self.logger.info(f"[{conv_key}] 🔊 VOICE CLONING NEEDED - Text was modified")
-                    self.logger.info(f"[{conv_key}]   Speaker: {speaker}, Reference segments: {len(reference_audio_list)}")
+                    self.logger.info(f"[{conv_key}]   Speaker: {speaker}, Reference segments: {len(reference_audio_list)} (excluding self)")
+
+                    # If no other segments available, use the current segment as fallback
+                    if not reference_audio_list:
+                        self.logger.warning(f"[{conv_key}] No other segments for speaker {speaker}, using current segment as reference")
+                        reference_audio_list = [conv['original']['speaker_audio']]
 
                     cloning_request = {
                         "action": "modify_speech",
