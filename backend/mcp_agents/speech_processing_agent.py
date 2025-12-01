@@ -395,32 +395,20 @@ class SpeechProcessingAgent(MCPAgent):
                 if idx in cloning_results_map:
                     cloning_result = cloning_results_map[idx]
 
-                    self.logger.info(f"[{conv_key}] 📊 Processing cloning result...")
-
-                    # Handle exceptions from parallel execution
                     if isinstance(cloning_result, Exception):
-                        self.logger.error(f"[{conv_key}] ❌ Voice cloning failed with exception: {cloning_result}")
-                        # Skip segment instead of using original audio with wrong text
-                        self.logger.warning(f"[{conv_key}] ⏭️  Skipping segment - cloning failed and text was modified")
+                        self.logger.error(f"[{conv_key}] Voice cloning failed: {cloning_result}")
                         continue
                     elif cloning_result.get('success'):
-                        # Use cloned audio
                         method = cloning_result['data'].get('method', 'unknown')
-                        self.logger.info(f"[{conv_key}] ✅ Voice cloning SUCCESS (method: {method})")
 
-                        # Check if it's actually cloned or fallback
                         if method in ['fallback_no_modal', 'fallback_modal_error', 'original']:
-                            self.logger.warning(f"[{conv_key}] ⚠️  FALLBACK USED - Modal not available or failed")
-                            self.logger.warning(f"[{conv_key}]   Fallback reason: {cloning_result['data'].get('metadata', {}).get('reason', 'unknown')}")
-                            self.logger.warning(f"[{conv_key}] ⚠️  Using original audio (text modification won't be reflected)")
+                            self.logger.warning(f"[{conv_key}] Fallback used - text modifications not reflected")
                         else:
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
                     else:
-                        # Skip segment instead of using original audio with wrong text
-                        self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
-                        self.logger.warning(f"[{conv_key}] ⏭️  Skipping segment")
+                        self.logger.error(f"[{conv_key}] Cloning failed: {cloning_result.get('error')}")
                         continue
 
                 elif is_artificial:
@@ -487,17 +475,7 @@ class SpeechProcessingAgent(MCPAgent):
     def _enhance_audio_quality(self, audio: AudioSegment) -> AudioSegment:
         """Apply audio enhancements for better quality"""
         try:
-            # Normalize audio levels
             normalized_audio = audio.normalize()
-            
-            # Apply gentle compression to even out levels
-            # Simple dynamic range compression
-            compressed_audio = normalized_audio.compress_dynamic_range(threshold=-20.0, ratio=4.0)
-            
-            # High-pass filter to remove low-frequency noise (if available)
-            # Note: pydub has limited built-in effects, for production consider using librosa
-            
-            return compressed_audio
+            return normalized_audio
         except:
-            # If enhancement fails, return original
             return audio
