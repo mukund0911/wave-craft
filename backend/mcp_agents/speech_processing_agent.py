@@ -401,11 +401,20 @@ class SpeechProcessingAgent(MCPAgent):
             import tempfile
             import os
             from datetime import datetime
+            from backend.utils.s3_storage import S3AudioStorage
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             debug_dir = os.path.join(tempfile.gettempdir(), "wavecraft_assembly", timestamp)
             os.makedirs(debug_dir, exist_ok=True)
-            self.logger.info(f"💾 Saving intermediate audio files to: {debug_dir}")
+
+            # Initialize S3 for debug file uploads
+            s3_storage = S3AudioStorage()
+            s3_debug_urls = []
+
+            if s3_storage.is_enabled():
+                self.logger.info(f"💾 Saving intermediate audio files to S3 (debug session: {timestamp})")
+            else:
+                self.logger.info(f"💾 Saving intermediate audio files locally to: {debug_dir}")
 
             final_audio = AudioSegment.silent(duration=0)
             segments_processed = 0
@@ -489,12 +498,29 @@ class SpeechProcessingAgent(MCPAgent):
                     else:
                         source_type = "original"
 
-                    # Save segment audio
+                    # Save segment audio locally
                     segment_filename = f"{idx:02d}_{conv_key}_{source_type}_{segment_duration:.2f}s.wav"
                     segment_path = os.path.join(debug_dir, segment_filename)
                     segment_audio.export(segment_path, format="wav")
 
-                    self.logger.info(f"  💾 Saved: {segment_filename}")
+                    # Upload to S3 if enabled
+                    if s3_storage.is_enabled():
+                        with open(segment_path, 'rb') as f:
+                            audio_bytes = f.read()
+
+                        debug_filename = f"debug/{timestamp}/{segment_filename}"
+                        s3_key = s3_storage.upload_audio(audio_bytes, filename=debug_filename)
+
+                        if s3_key:
+                            s3_url = s3_storage.get_presigned_url(s3_key, expiration=86400)  # 24 hours
+                            s3_debug_urls.append({
+                                'segment': segment_filename,
+                                'url': s3_url
+                            })
+                            self.logger.info(f"  💾 Uploaded to S3: {segment_filename}")
+                    else:
+                        self.logger.info(f"  💾 Saved locally: {segment_filename}")
+
                 except Exception as e:
                     self.logger.warning(f"  Failed to save intermediate file: {e}")
 
@@ -517,7 +543,22 @@ class SpeechProcessingAgent(MCPAgent):
                 final_filename = f"FINAL_assembled_{final_duration:.2f}s.wav"
                 final_path = os.path.join(debug_dir, final_filename)
                 final_audio.export(final_path, format="wav")
-                self.logger.info(f"💾 Saved final assembled audio: {final_filename}")
+
+                # Upload final assembled audio to S3
+                if s3_storage.is_enabled():
+                    with open(final_path, 'rb') as f:
+                        final_audio_bytes = f.read()
+
+                    debug_final_filename = f"debug/{timestamp}/{final_filename}"
+                    final_s3_key = s3_storage.upload_audio(final_audio_bytes, filename=debug_final_filename)
+
+                    if final_s3_key:
+                        final_s3_url = s3_storage.get_presigned_url(final_s3_key, expiration=86400)
+                        s3_debug_urls.append({
+                            'segment': final_filename,
+                            'url': final_s3_url
+                        })
+                        self.logger.info(f"💾 Uploaded final assembled audio to S3: {final_filename}")
 
                 # Save metadata file
                 import json
@@ -526,7 +567,8 @@ class SpeechProcessingAgent(MCPAgent):
                     "total_segments": segments_processed,
                     "cloned_segments": segments_cloned,
                     "final_duration_seconds": final_duration,
-                    "assembly_order": []
+                    "assembly_order": [],
+                    "s3_debug_files": s3_debug_urls if s3_storage.is_enabled() else []
                 }
 
                 # Document each conversation that was processed
@@ -545,10 +587,30 @@ class SpeechProcessingAgent(MCPAgent):
                 metadata_path = os.path.join(debug_dir, "ASSEMBLY_INFO.json")
                 with open(metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(metadata, f, indent=2, ensure_ascii=False)
-                self.logger.info(f"💾 Saved assembly metadata: ASSEMBLY_INFO.json")
+
+                # Upload metadata to S3
+                if s3_storage.is_enabled():
+                    with open(metadata_path, 'rb') as f:
+                        metadata_bytes = f.read()
+
+                    debug_metadata_filename = f"debug/{timestamp}/ASSEMBLY_INFO.json"
+                    metadata_s3_key = s3_storage.upload_audio(metadata_bytes, filename=debug_metadata_filename, content_type='application/json')
+
+                    if metadata_s3_key:
+                        metadata_s3_url = s3_storage.get_presigned_url(metadata_s3_key, expiration=86400)
+                        self.logger.info(f"💾 Uploaded assembly metadata to S3: ASSEMBLY_INFO.json")
+                        self.logger.info(f"📋 Metadata URL: {metadata_s3_url}")
+
+                # Log all S3 URLs
+                if s3_storage.is_enabled() and s3_debug_urls:
+                    self.logger.info("="*70)
+                    self.logger.info("🔗 DEBUG FILES ON S3 (valid for 24 hours):")
+                    for item in s3_debug_urls:
+                        self.logger.info(f"  {item['segment']}: {item['url']}")
+                    self.logger.info("="*70)
 
             except Exception as e:
-                self.logger.warning(f"Failed to save final assembled audio: {e}")
+                self.logger.warning(f"Failed to save/upload debug files: {e}")
 
             # ================================================================
             # STEP 4: Apply audio enhancements for quality
