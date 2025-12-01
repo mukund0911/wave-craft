@@ -378,9 +378,6 @@ class SpeechProcessingAgent(MCPAgent):
                 conv_key = list(conv_data.keys())[0]
                 conv = conv_data[conv_key]
 
-                # DEBUG: Track assembly order
-                self.logger.info(f"🔢 ASSEMBLING idx={idx}, conv_key={conv_key}, position in final audio: {len(final_audio)/1000:.2f}s")
-
                 if 'speaker_audio' not in conv.get('original', {}):
                     self.logger.warning(f"No speaker audio found for {conv_key}")
                     continue
@@ -420,37 +417,6 @@ class SpeechProcessingAgent(MCPAgent):
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
-
-                        # DEBUG: Compare original vs cloned audio duration
-                        original_audio_seg = self._byte_to_wav(conv['original']['speaker_audio'])
-                        original_dur = len(original_audio_seg) / 1000.0
-                        cloned_dur = len(segment_audio) / 1000.0
-                        dur_diff = original_dur - cloned_dur
-
-                        # Check if audio is actually silent (amplitude check)
-                        import numpy as np
-                        audio_array = np.array(segment_audio.get_array_of_samples())
-                        max_amplitude = np.max(np.abs(audio_array))
-                        rms = np.sqrt(np.mean(audio_array**2))
-
-                        self.logger.info(f"[{conv_key}] 🎵 Audio Duration Comparison:")
-                        self.logger.info(f"[{conv_key}]   Original: {original_dur:.2f}s")
-                        self.logger.info(f"[{conv_key}]   Cloned: {cloned_dur:.2f}s")
-                        self.logger.info(f"[{conv_key}]   Difference: {dur_diff:.2f}s ({'shorter' if dur_diff > 0 else 'longer'} after cloning)")
-                        self.logger.info(f"[{conv_key}]   Max amplitude: {max_amplitude}, RMS: {rms:.2f}")
-
-                        if max_amplitude < 100:
-                            self.logger.warning(f"[{conv_key}] ⚠️  CLONED AUDIO IS NEARLY SILENT! (max_amp={max_amplitude})")
-                            self.logger.warning(f"[{conv_key}]   This segment will be inaudible in final audio!")
-
-                        # Check sample rate compatibility
-                        self.logger.info(f"[{conv_key}]   Sample rate: {segment_audio.frame_rate}Hz, Channels: {segment_audio.channels}")
-                        self.logger.info(f"[{conv_key}]   Original sample rate: {original_audio_seg.frame_rate}Hz")
-
-                        # CRITICAL: Ensure sample rate matches for concatenation
-                        if segment_audio.frame_rate != original_audio_seg.frame_rate:
-                            self.logger.warning(f"[{conv_key}] ⚠️  Sample rate mismatch! Converting {segment_audio.frame_rate}Hz → {original_audio_seg.frame_rate}Hz")
-                            segment_audio = segment_audio.set_frame_rate(original_audio_seg.frame_rate)
                     else:
                         # Skip segment instead of using original audio with wrong text
                         self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
@@ -471,12 +437,8 @@ class SpeechProcessingAgent(MCPAgent):
                 if len(final_audio) > 0:
                     final_audio += AudioSegment.silent(duration=500)  # 0.5 second gap
 
-                segment_duration = len(segment_audio) / 1000.0
                 final_audio += segment_audio
                 segments_processed += 1
-
-                # DEBUG: Confirm what was added
-                self.logger.info(f"✅ ADDED {conv_key} to final audio: duration={segment_duration:.2f}s, new total={len(final_audio)/1000:.2f}s")
 
             self.logger.info(f"Processed {segments_processed} segments, cloned {segments_cloned}")
 
@@ -525,16 +487,17 @@ class SpeechProcessingAgent(MCPAgent):
     def _enhance_audio_quality(self, audio: AudioSegment) -> AudioSegment:
         """Apply audio enhancements for better quality"""
         try:
-            # TEMPORARY: Disable compression to debug cloned audio issue
-            # The compress_dynamic_range() might be corrupting cloned segments
-
-            # Normalize audio levels (this should be safe)
+            # Normalize audio levels
             normalized_audio = audio.normalize()
-
-            # DISABLED: compression might be causing cloned segments to become silent
-            # compressed_audio = normalized_audio.compress_dynamic_range(threshold=-20.0, ratio=4.0)
-
-            return normalized_audio  # Return normalized only, no compression
+            
+            # Apply gentle compression to even out levels
+            # Simple dynamic range compression
+            compressed_audio = normalized_audio.compress_dynamic_range(threshold=-20.0, ratio=4.0)
+            
+            # High-pass filter to remove low-frequency noise (if available)
+            # Note: pydub has limited built-in effects, for production consider using librosa
+            
+            return compressed_audio
         except:
             # If enhancement fails, return original
             return audio
