@@ -525,17 +525,16 @@ class SpeechProcessingAgent(MCPAgent):
     def _enhance_audio_quality(self, audio: AudioSegment) -> AudioSegment:
         """Apply audio enhancements for better quality"""
         try:
-            # Normalize audio levels
+            # TEMPORARY: Disable compression to debug cloned audio issue
+            # The compress_dynamic_range() might be corrupting cloned segments
+
+            # Normalize audio levels (this should be safe)
             normalized_audio = audio.normalize()
-            
-            # Apply gentle compression to even out levels
-            # Simple dynamic range compression
-            compressed_audio = normalized_audio.compress_dynamic_range(threshold=-20.0, ratio=4.0)
-            
-            # High-pass filter to remove low-frequency noise (if available)
-            # Note: pydub has limited built-in effects, for production consider using librosa
-            
-            return compressed_audio
+
+            # DISABLED: compression might be causing cloned segments to become silent
+            # compressed_audio = normalized_audio.compress_dynamic_range(threshold=-20.0, ratio=4.0)
+
+            return normalized_audio  # Return normalized only, no compression
         except:
             # If enhancement fails, return original
             return audio
