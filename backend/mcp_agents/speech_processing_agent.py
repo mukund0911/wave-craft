@@ -417,6 +417,16 @@ class SpeechProcessingAgent(MCPAgent):
                             segments_cloned += 1
 
                         segment_audio = self._byte_to_wav(cloning_result['data']['modified_audio_base64'])
+
+                        # DEBUG: Compare original vs cloned audio duration
+                        original_audio_seg = self._byte_to_wav(conv['original']['speaker_audio'])
+                        original_dur = len(original_audio_seg) / 1000.0
+                        cloned_dur = len(segment_audio) / 1000.0
+                        dur_diff = original_dur - cloned_dur
+                        self.logger.info(f"[{conv_key}] 🎵 Audio Duration Comparison:")
+                        self.logger.info(f"[{conv_key}]   Original: {original_dur:.2f}s")
+                        self.logger.info(f"[{conv_key}]   Cloned: {cloned_dur:.2f}s")
+                        self.logger.info(f"[{conv_key}]   Difference: {dur_diff:.2f}s ({'shorter' if dur_diff > 0 else 'longer'} after cloning)")
                     else:
                         # Skip segment instead of using original audio with wrong text
                         self.logger.error(f"[{conv_key}] ❌ Cloning failed: {cloning_result.get('error')}")
