@@ -36,6 +36,7 @@ jobs:
           pip install "pyyaml==5.4.1" --no-build-isolation
           git fetch --all --unshallow
           git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
+          git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
 
       # - name: Deploy to Heroku
       #   uses: akhileshns/heroku-deploy@v3.13.15
