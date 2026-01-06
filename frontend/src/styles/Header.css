@@ -1,45 +1,86 @@
 .header {
-    width: 90%;
-    padding: 10px;
-    margin: 10px auto 0; 
-    font-family: "Crete Round", serif;
-    font-weight: bold;
-    display: flex;
-    justify-content: space-between;
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    margin: 0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     align-items: center;
-    border-radius: 15px;
-    background-color: rgba(0, 0, 0, 0.219); 
-    backdrop-filter: blur(10px); 
-    -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.2); 
-    position: sticky;
-    top: 7vh; 
+    border-radius: 0;
+    background-color: #FAFAF8;
+    border-top: 1px solid #D1CDC4;
+    border-bottom: 1px solid #D1CDC4;
+    box-shadow: none;
+    position: relative;
     z-index: 100;
+    height: 80px;
+}
+
+.header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: #D1CDC4;
+    left: 50%;
 }
 
 .header h1 {
-    margin: 0; 
-    margin-left: 20px;
-    font-size: 25px;
-    font-weight: 300;
-    color:#e0e0e0d6;
+    margin: 0;
+    padding-left: 40px;
+    font-family: 'Pacifico', cursive;
+    font-size: 26px;
+    font-weight: 400;
+    color: #0D1717;
+    letter-spacing: 0.02em;
+    justify-self: start;
 }
-
-
-/* .header a{
-    margin-right: 20px;
-    width: 70px;
-    height: auto;
-    font-family: sans-serif;
-    color: white;
-} */
 
 .header a {
-    display: flex; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 40px;
+    text-decoration: none;
+    transition: opacity 0.2s ease;
+    justify-self: end;
 }
 
-.header img {
-    margin-right: 20px;
-    width: 40px;
-    height: auto;
+.header a:hover {
+    opacity: 0.7;
+}
+
+.header a svg,
+.header a img {
+    width: 38px;
+    height: 38px;
+    fill: #0D1717;
+    filter: invert(1) brightness(0);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .header {
+        grid-template-columns: 1fr 1fr;
+        height: 70px;
+    }
+
+    .header::before {
+        left: 50%;
+    }
+
+    .header::after {
+        display: none;
+    }
+
+    .header h1 {
+        padding-left: 24px;
+        font-size: 20px;
+    }
+
+    .header a {
+        padding: 0 24px;
+    }
 }

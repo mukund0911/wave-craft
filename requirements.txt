@@ -1,4 +1,4 @@
-annotated-types==0.7.0
+# annotated-types==0.7.0
 anyio==4.7.0
 assemblyai==0.36.0
 audioread==3.0.1

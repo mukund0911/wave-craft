@@ -1,45 +1,68 @@
-@font-face {
-    font-family: 'SFOpen';
-    src: url('/fonts/sf-pro-display/SFPRODISPLAYREGULAR.OTF') format('opentype');
-}
-
-.inner {
-    position: relative;
-    width: 100%;
-}
-
-.upload-container{
-    margin-top: 0px;
-}
-
 .upload-button {
-    width: 30%;
-    padding: 20px 40px;
-    font-size: 22px;   
-    font-weight: lighter;
-    margin: 0 0 auto auto;
-    background-color: rgba(255, 255, 255, 0.911);
+    margin-top: 48px;
+    padding: 18px 48px;
+    font-size: 16px;
+    font-weight: 500;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #0D1717;
+    background-color: #E94431;
     border: none;
-    border-radius: 40px;
-    font-family: "SFOpen";
-    box-shadow: 7px 6px 28px 1px rgba(0, 0, 0, 0.24); 
-    cursor: pointer; 
-    outline: none; 
-    transition: 0.2s all; 
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: none;
+    position: relative;
 }
 
 .upload-button:hover {
-    background-color: white;
+    opacity: 0.9;
+    transform: translateY(-1px);
 }
 
-.upload-button:active { 
-    transform: scale(0.98); 
-    box-shadow: 3px 2px 22px 1px rgba(0, 0, 0, 0.24); 
-} 
+.upload-button:active {
+    transform: translateY(0);
+}
 
-.file-formats {
-    font-family: "SFOpen";
-    margin-top: 8px;
-    color: #202020; 
+.upload-button input[type="file"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.upload-button.processing {
+    background-color: #C03A2B;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.upload-button.processing:hover {
+    transform: none;
+}
+
+.processing-status {
+    margin-top: 16px;
     font-size: 14px;
+    font-weight: 500;
+    color: #0D1717;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .upload-button {
+        padding: 16px 40px;
+        font-size: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .upload-button {
+        padding: 14px 32px;
+        font-size: 14px;
+        margin-top: 32px;
+    }
 }
