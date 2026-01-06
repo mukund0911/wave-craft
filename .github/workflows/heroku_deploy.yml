@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -31,12 +33,31 @@ jobs:
       - name: Deploy to Heroku
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
         run: |
           pip install "cython<3.0.0" wheel
           pip install "pyyaml==5.4.1" --no-build-isolation
-          git fetch --all --unshallow
-          git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
-          git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main
+
+          # make sure we have history available for merging
+          git fetch --all --unshallow || true
+
+          # configure heroku remote using API key
+          git remote remove heroku || true
+          git remote add heroku https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git
+
+          # fetch heroku main (shallow is enough for comparison)
+          git fetch heroku main --depth=1 || true
+
+          # If heroku/main has commits not present locally, merge them and fail on conflict
+          if [ "$(git rev-list --count HEAD..heroku/main 2>/dev/null)" -gt 0 ]; then
+            echo "Merging remote changes from heroku/main into HEAD"
+            git merge heroku/main --no-edit || (echo "Merge conflict when merging heroku/main into HEAD - aborting"; exit 1)
+          else
+            echo "No remote-only commits on heroku/main"
+          fi
+
+          # push merged result to heroku
+          git push heroku HEAD:main
 
       # - name: Deploy to Heroku
       #   uses: akhileshns/heroku-deploy@v3.13.15
