@@ -24,25 +24,45 @@ app = modal.App("wavecraft-gpu")
 model_volume = modal.Volume.from_name("wavecraft-models", create_if_missing=True)
 MODEL_CACHE_DIR = "/models"
 
-# GPU image with all ML deps
-gpu_image = (
+# ─── GPU Images ───
+
+# WhisperX requires Python 3.11, Torch >= 2.8, Numpy >= 2.1
+whisperx_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libsndfile1", "git")
+    .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch>=2.0.0",
-        "torchaudio>=2.0.0",
-        "numpy>=1.24.0",
-        "pydub>=0.25.1",
-        "openai-whisper",
-        "faster-whisper>=1.0.0",
+        "torch>=2.8.0",
+        "torchaudio>=2.8.0",
+        "numpy>=2.1.0",
+        "fastapi[standard]",
         gpu="a10g",
     )
     .pip_install(
+        "whisperx @ git+https://github.com/m-bain/whisperx.git",
         "pyannote.audio>=3.1.0",
-        "chatterbox-tts>=0.1.0",
+    )
+    .env({
+        "HF_HOME": MODEL_CACHE_DIR,
+        "TORCH_HOME": MODEL_CACHE_DIR,
+        "TRANSFORMERS_CACHE": f"{MODEL_CACHE_DIR}/transformers",
+    })
+)
+
+# Chatterbox TTS requires Python 3.11, Torch == 2.6.0, Numpy < 1.26
+chatterbox_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg", "libsndfile1")
+    .pip_install(
+        "torch==2.6.0",
+        "torchaudio==2.6.0",
+        "numpy>=1.24.0,<1.26.0",
+        "fastapi[standard]",
         "peft",
         "huggingface_hub[hf_xet]",
-        "fastapi[standard]",
+        gpu="a10g",
+    )
+    .pip_install(
+        "chatterbox-tts>=0.1.0",
     )
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
@@ -55,7 +75,7 @@ gpu_image = (
 # ─── Transcription Endpoint (WhisperX) ───
 
 @app.cls(
-    image=gpu_image,
+    image=whisperx_image,
     gpu="A10G",
     timeout=600,
     volumes={MODEL_CACHE_DIR: model_volume},
@@ -233,7 +253,7 @@ class TranscribeService:
 # ─── TTS Endpoint (Chatterbox) ───
 
 @app.cls(
-    image=gpu_image,
+    image=chatterbox_image,
     gpu="A10G",
     timeout=300,
     volumes={MODEL_CACHE_DIR: model_volume},
