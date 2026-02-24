@@ -1,0 +1,21 @@
+# WaveCrafter GPU Dependencies (Modal service only)
+# These are NOT installed on Heroku — they run on Modal A10G GPUs
+#
+# Install locally for dev: pip install -r requirements-gpu.txt
+
+# PyTorch
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Speech-to-Text
+whisperx>=3.1.0
+
+# TTS / Voice Cloning
+chatterbox-tts>=0.1.0
+
+# Diarization (via whisperx)
+pyannote.audio>=3.1.0
+peft
+
+# Hugging Face
+huggingface_hub[hf_xet]

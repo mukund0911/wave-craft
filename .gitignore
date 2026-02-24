@@ -1,6 +1,5 @@
 misc
-env_wave
-venv-wave
+.env
 __pycache__
 .claude
 
