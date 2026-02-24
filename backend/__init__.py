@@ -11,7 +11,7 @@ def create_app():
     # CORS configuration - allow all origins to handle dyno wake-up issues
     CORS(app,
          origins=['https://wave-crafter.com',
-                  'https://wave-crafter-3ad7c939239a.herokuapp.com',
+                  'https://wave-crafter-587074aad3d2.herokuapp.com',
                   'http://localhost:3000',
                   'http://127.0.0.1:3000',
                   'http://localhost:5000'],
