@@ -1,0 +1,30 @@
+name: Deploy Modal GPU Service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modal_service/**'
+      - '.github/workflows/modal_deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Deploy to Modal
+        run: modal deploy modal_service/modal_app.py
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}

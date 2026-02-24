@@ -2,78 +2,74 @@
 
 ## Quick Start
 
-### 1. Deploy Modal Service
+### 1. Deploy Modal GPU Service
 ```bash
 cd modal_service
-modal deploy voicecraft_text_modification.py
+modal deploy modal_app.py
 ```
 
-**Your API endpoint:**
+**Your new API endpoints:**
 ```
-https://mukund0911--wavecraft-voicecraft-textmod-web.modal.run
+https://<your-username>--wavecraft-gpu-transcribeservice-transcribe.modal.run
+https://<your-username>--wavecraft-gpu-ttsservice-synthesize.modal.run
 ```
+*(Copy the base URL from the deployment output)*
 
 ### 2. Configure Backend
 
-**Heroku:**
-```bash
-heroku config:set MODAL_VOICECRAFT_URL="https://mukund0911--wavecraft-voicecraft-textmod-web.modal.run" -a your-app-name
-```
+**Heroku Setup (API Proxy):**
+1. Create a new app in Heroku Dashboard
+2. Go to Deploy tab -> Connect GitHub repository
+3. Enable Automatic Deploys from `main`
+4. Go to Settings -> Reveal Config Vars and add:
+   - `MODAL_TRANSCRIBE_URL` = (your Modal transcribe URL)
+   - `MODAL_TTS_URL` = (your Modal synthesize URL)
+   - `HF_TOKEN` = (your Hugging Face token)
 
-**Local (.env):**
+**Local Development (.env):**
 ```bash
-MODAL_VOICECRAFT_URL=https://mukund0911--wavecraft-voicecraft-textmod-web.modal.run
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_S3_BUCKET=wavecraft-audio
-AWS_REGION=us-east-1
-ASSEMBLY_AI_KEY=your_key
+HF_TOKEN=hf_your_token_here
+# Leave empty to run inference locally, OR test remote by setting:
+# MODAL_TRANSCRIBE_URL=https://<your-modal-app-url>
+# MODAL_TTS_URL=https://<your-modal-app-url>
 ```
 
 ### 3. Test
 
-**Health check:**
+**Run backend locally:**
 ```bash
-curl https://mukund0911--wavecraft-voicecraft-textmod-web.modal.run/health
-```
-
-**Run backend:**
-```bash
-python backend/run.py
+python run.py
 ```
 
 **Open frontend:**
+```bash
+cd frontend
+npm start
 ```
-http://localhost:3000
-```
-
-## Features
-
-✅ Voice cloning with text modification
-✅ Multi-speaker support
-✅ S3 storage for audio files
-✅ Real-time transcription
-✅ Quality: 85-90% voice similarity
-✅ Latency: 8-12s per segment
 
 ## Architecture
 
 ```
-Frontend (React) → Backend (Flask) → Modal (VoiceCraft GPU) → S3 (Storage)
-                                   ↓
-                            AssemblyAI (Transcription)
+Frontend (React, GitHub Pages)
+       ↓
+Backend API (Flask, Heroku)
+       ↓
+GPU Inference (Modal A10G)
 ```
+
+1. **Frontend**: Hosted on GitHub pages (`wave-crafter.com`). Makes calls to Heroku API.
+2. **Backend**: Lightweight API proxy on Heroku. No GPUs, no heavy ML deps.
+3. **Modal**: Serverless endpoints for WhisperX transcription and Chatterbox TTS. Runs purely on A10G GPUs.
 
 ## Cost Estimate
 
-- Modal GPU: ~$0.004/request
-- S3 Storage: ~$0.001/request
-- AssemblyAI: ~$0.04/request
-- **Total: ~$0.045 per voice cloning request**
+- Modal GPU (A10G): ~$0.0008/sec active time
+- No API costs for transcription/TTS (all inference happens on Modal)
+- S3 Storage (optional): ~$0.001/request
 
-For 1000 requests/month: ~$45/month
+For 1000 requests/month: ~$5-10/month (Modal usage only)
 
 ## Support
 
 - Modal Dashboard: https://modal.com/apps
-- Issues: Check logs with `modal app logs wavecraft-voicecraft-textmod`
+- Heroku Logs: `heroku logs --tail -a your-app-name`
