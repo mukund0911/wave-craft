@@ -1,181 +1,203 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 
-const WaveBackground = () => {
+/**
+ * Premium 3D Wave Background
+ *
+ * Dark scene with flowing gradient particles (navy → cyan → purple).
+ * Smooth sinusoidal wave motion with glow effects.
+ * Used as the hero section background.
+ */
+function WaveBackground() {
   const mountRef = useRef(null);
 
   useEffect(() => {
-    console.log('WaveBackground mounted');
-    // Variables
-    const SEPARATION = 100, AMOUNTX = 100, AMOUNTY = 50;
-    let container;
-    let camera, scene, renderer;
-    let particles, count = 0;
+    const container = mountRef.current;
+    if (!container) return;
 
-    // Initialize
-    const init = () => {
-      container = mountRef.current;
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 8, 20);
+    camera.lookAt(0, 0, 0);
 
-      // Camera
-      camera = new THREE.PerspectiveCamera(
-        60,
-        window.innerWidth / window.innerHeight,
-        1,
-        10000
-      );
-      camera.position.set(800, 100, 800);
-      camera.lookAt(new THREE.Vector3(0, 0, 0));
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+    });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0); // Transparent background
+    container.appendChild(renderer.domElement);
 
-      // Scene
-      scene = new THREE.Scene();
+    // Create wave particles
+    const particleCount = 8000;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
 
-      // Particles
-      const numParticles = AMOUNTX * AMOUNTY;
+    // Color palette
+    const colorPalette = [
+      new THREE.Color(0x3b82f6), // Blue
+      new THREE.Color(0x06b6d4), // Cyan
+      new THREE.Color(0x8b5cf6), // Purple
+      new THREE.Color(0x1e40af), // Deep blue
+    ];
 
-      const positions = new Float32Array(numParticles * 3);
-      const scales = new Float32Array(numParticles);
+    const gridWidth = 100;
+    const gridDepth = 50;
+    const cols = Math.ceil(Math.sqrt(particleCount * (gridWidth / gridDepth)));
+    const rows = Math.ceil(particleCount / cols);
 
-      let i = 0, j = 0;
-      for (let ix = 0; ix < AMOUNTX; ix++) {
-        for (let iy = 0; iy < AMOUNTY; iy++) {
-          positions[i] = ix * SEPARATION - ((AMOUNTX * SEPARATION) / 2); // x
-          positions[i + 1] = 0; // y
-          positions[i + 2] = iy * SEPARATION - ((AMOUNTY * SEPARATION) / 2); // z
+    for (let i = 0; i < particleCount; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
 
-          scales[j] = 1;
+      const x = (col / cols - 0.5) * gridWidth + (Math.random() - 0.5) * 0.8;
+      const z = (row / rows - 0.5) * gridDepth + (Math.random() - 0.5) * 0.8;
+      const y = 0;
 
-          i += 3;
-          j++;
-        }
-      }
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
 
-      // Create BufferGeometry
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geometry.setAttribute('scale', new THREE.BufferAttribute(scales, 1));
+      // Color based on position (gradient across the wave)
+      const t = Math.max(0, Math.min(1, (x + gridWidth / 2) / gridWidth));
+      const scaledT = t * (colorPalette.length - 1);
+      const colorIndex = Math.min(Math.floor(scaledT), colorPalette.length - 2);
+      const colorFrac = scaledT - colorIndex;
+      const c1 = colorPalette[colorIndex];
+      const c2 = colorPalette[colorIndex + 1];
+      const color = c1.clone().lerp(c2, colorFrac);
 
-      // Create a circular texture
-      const texture = createCircleTexture();
+      colors[i * 3] = color.r;
+      colors[i * 3 + 1] = color.g;
+      colors[i * 3 + 2] = color.b;
 
-      // Particle material with circular texture and smaller size
-      const material = new THREE.PointsMaterial({
-        color: 0x757575, // Light Gray particles
-        size: 7, // Reduced size
-        sizeAttenuation: true,
-        map: texture,
-        alphaTest: 0.5,
-        transparent: true,
-      });
+      sizes[i] = 0.06 + Math.random() * 0.08;
+    }
 
-      // Create Points
-      particles = new THREE.Points(geometry, material);
-      scene.add(particles);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-      // Renderer
-      renderer = new THREE.WebGLRenderer({ alpha: true });
-      renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      container.appendChild(renderer.domElement);
+    // Custom shader material for glow effect
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uPixelRatio: { value: renderer.getPixelRatio() },
+      },
+      vertexShader: `
+                attribute float size;
+                varying vec3 vColor;
+                uniform float uTime;
+                uniform float uPixelRatio;
 
-      // Event Listener
-      window.addEventListener('resize', onWindowResize, false);
-    };
+                void main() {
+                    vColor = color;
 
-    // Create a circular texture
-    const createCircleTexture = () => {
-      const size = 64;
+                    vec3 pos = position;
 
-      // Create canvas
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
+                    // Multi-layered wave
+                    float wave1 = sin(pos.x * 0.15 + uTime * 0.6) * 2.0;
+                    float wave2 = sin(pos.z * 0.2 + uTime * 0.4) * 1.2;
+                    float wave3 = cos(pos.x * 0.08 + pos.z * 0.1 + uTime * 0.3) * 1.5;
+                    pos.y = wave1 + wave2 + wave3;
 
-      // Get context
-      const context = canvas.getContext('2d');
+                    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                    gl_Position = projectionMatrix * mvPosition;
+                    gl_PointSize = size * uPixelRatio * 80.0 / -mvPosition.z;
+                }
+            `,
+      fragmentShader: `
+                varying vec3 vColor;
 
-      // Draw circle
-      context.beginPath();
-      context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2, false);
-      context.closePath();
+                void main() {
+                    // Soft circle with glow
+                    float dist = length(gl_PointCoord - vec2(0.5));
+                    if (dist > 0.5) discard;
 
-      // Fill style
-      context.fillStyle = 'white';
-      context.fill();
+                    float alpha = 1.0 - smoothstep(0.1, 0.5, dist);
+                    alpha *= 0.7; // Overall transparency
 
-      // Create texture
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.needsUpdate = true;
-      texture.minFilter = THREE.LinearFilter;
-      texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+                    gl_FragColor = vec4(vColor, alpha);
+                }
+            `,
+      transparent: true,
+      vertexColors: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
 
-      return texture;
-    };
+    const particles = new THREE.Points(geometry, material);
+    scene.add(particles);
 
-    // Event Handler
-    const onWindowResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+    // Add subtle ambient light
+    const ambientLight = new THREE.AmbientLight(0x3b82f6, 0.1);
+    scene.add(ambientLight);
 
     // Animation
+    let animationId;
+    const clock = new THREE.Clock();
+
     const animate = () => {
-      requestAnimationFrame(animate);
-      render();
-    };
+      animationId = requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
 
-    const render = () => {
-      renderer.setClearColor(0xeeeeee, 1);
+      material.uniforms.uTime.value = elapsed;
 
-      const positions = particles.geometry.attributes.position.array;
-      const scales = particles.geometry.attributes.scale.array;
-
-      let i = 0, j = 0;
-      for (let ix = 0; ix < AMOUNTX; ix++) {
-        for (let iy = 0; iy < AMOUNTY; iy++) {
-
-          positions[i + 1] = (Math.sin((ix + count) * 0.3) * 20) +
-                             (Math.sin((iy + count) * 0.5) * 20);
-
-          scales[j] = (Math.sin((ix + count) * 0.3) + 1) * 2 +
-                      (Math.sin((iy + count) * 0.5) + 1) * 2; // Reduced multiplier
-
-          i += 3;
-          j++;
-        }
-      }
-
-      particles.geometry.attributes.position.needsUpdate = true;
-      particles.geometry.attributes.scale.needsUpdate = true;
+      // Gentle camera sway
+      camera.position.x = Math.sin(elapsed * 0.1) * 3;
+      camera.position.y = 8 + Math.sin(elapsed * 0.15) * 1;
+      camera.lookAt(0, 0, 0);
 
       renderer.render(scene, camera);
-      count += 0.1;
     };
 
-    // Start
-    init();
     animate();
 
-    // Cleanup on unmount
+    // Handle resize
+    const handleResize = () => {
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      material.uniforms.uPixelRatio.value = renderer.getPixelRatio();
+    };
+
+    window.addEventListener('resize', handleResize);
+
     return () => {
-      container.removeChild(renderer.domElement);
-      window.removeEventListener('resize', onWindowResize, false);
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationId);
+      renderer.dispose();
+      geometry.dispose();
+      material.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
     };
   }, []);
 
-  // Style to make the canvas cover the entire background
-  const style = {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    zIndex: 0, // Ensure it appears behind content
-    overflow: 'hidden',
-  };
-
-  return <div ref={mountRef} style={style} />;
-};
+  return (
+    <div
+      ref={mountRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+      }}
+    />
+  );
+}
 
 export default WaveBackground;

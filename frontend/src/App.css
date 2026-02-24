@@ -1,16 +1,4 @@
-@font-face {
-  font-family: 'SFOpen';
-  src: url('/fonts/sf-pro-display/SFPRODISPLAYREGULAR.OTF') format('otf');
-  font-weight: normal;
-  font-style: normal;
-}
-
 .App {
-  text-align: center;
-  font-family: "SFOpen";
-  font-weight: 400;
-  font-style: normal;
-  /* background-color: #ffffff	; */
+  min-height: 100vh;
+  background: var(--bg-primary, #ffffff);
 }
-
-

@@ -1,0 +1,308 @@
+/* ─── Emotion Picker Popover ─── */
+.emotion-picker {
+    position: absolute;
+    z-index: 200;
+    width: 320px;
+    background: rgba(17, 24, 39, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        0 0 40px rgba(59, 130, 246, 0.1);
+    animation: pickerFadeIn 0.2s ease-out;
+}
+
+@keyframes pickerFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.96);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Header */
+.emotion-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.emotion-tabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.emotion-tab {
+    padding: 6px 14px;
+    background: none;
+    border: none;
+    color: var(--text-muted, #64748b);
+    font-size: 0.8rem;
+    font-weight: 500;
+    font-family: var(--font-body, 'Inter', sans-serif);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.emotion-tab.active {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.emotion-tab:hover:not(.active) {
+    color: var(--text-secondary, #94a3b8);
+}
+
+.emotion-close {
+    background: none;
+    border: none;
+    color: var(--text-muted, #64748b);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.emotion-close:hover {
+    color: var(--text-primary, #f0f4ff);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Emotion Grid */
+.emotion-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.emotion-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.emotion-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.08);
+    transform: translateY(-1px);
+}
+
+.emotion-item.selected {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.1);
+}
+
+.emotion-emoji {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.emotion-label {
+    font-size: 0.65rem;
+    color: var(--text-muted, #64748b);
+    font-weight: 500;
+}
+
+/* Intensity Slider */
+.emotion-intensity {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.intensity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #94a3b8);
+}
+
+.intensity-value {
+    color: #3b82f6;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.intensity-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.8));
+    border-radius: 100px;
+    outline: none;
+}
+
+.intensity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+    transition: box-shadow 0.2s;
+}
+
+.intensity-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.6);
+}
+
+.intensity-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 0.7rem;
+    color: var(--text-muted, #64748b);
+}
+
+/* Paralinguistic Grid */
+.paralinguistic-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.paralinguistic-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+    width: 100%;
+}
+
+.paralinguistic-item:hover {
+    background: rgba(139, 92, 246, 0.08);
+    border-color: rgba(139, 92, 246, 0.2);
+    transform: translateX(2px);
+}
+
+.paralinguistic-emoji {
+    font-size: 1.3rem;
+}
+
+.paralinguistic-label {
+    font-size: 0.85rem;
+    color: var(--text-primary, #f0f4ff);
+    font-weight: 500;
+    flex: 1;
+}
+
+.paralinguistic-tag {
+    font-size: 0.7rem;
+    color: var(--text-muted, #64748b);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+/* Remove Button */
+.emotion-remove {
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    border-radius: 8px;
+    color: #ef4444;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.emotion-remove:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ─── Emotion Chips (on transcript words) ─── */
+.emotion-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    margin-left: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    vertical-align: middle;
+}
+
+.emotion-chip.happy {
+    background: rgba(250, 204, 21, 0.15);
+    color: #facc15;
+}
+
+.emotion-chip.sad {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+}
+
+.emotion-chip.angry {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+}
+
+.emotion-chip.excited {
+    background: rgba(251, 146, 60, 0.15);
+    color: #fb923c;
+}
+
+.emotion-chip.calm {
+    background: rgba(45, 212, 191, 0.15);
+    color: #2dd4bf;
+}
+
+.emotion-chip.fearful {
+    background: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+}
+
+.emotion-chip.surprised {
+    background: rgba(236, 72, 153, 0.15);
+    color: #ec4899;
+}
+
+.emotion-chip.neutral {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+}
+
+.emotion-chip:hover {
+    filter: brightness(1.2);
+    transform: scale(1.05);
+}

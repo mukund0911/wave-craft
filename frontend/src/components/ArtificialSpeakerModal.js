@@ -1,86 +1,100 @@
 import React, { useState } from 'react';
 import '../styles/ArtificialSpeakerModal.css';
 
-function ArtificialSpeakerModal({ isOpen, onClose, onSubmit, conversationHistory }) {
-    const [speakerPrompt, setSpeakerPrompt] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!speakerPrompt.trim()) {
-            alert('Please provide speaker characteristics');
-            return;
-        }
-
-        setIsLoading(true);
-
-        const requestData = {
-            conversation_history: conversationHistory,
-            speaker_prompt: speakerPrompt
-        };
-
-        try {
-            await onSubmit(requestData);
-            setSpeakerPrompt('');
-            onClose();
-        } catch (error) {
-            console.error('Error creating artificial speaker:', error);
-            alert('Failed to create artificial speaker. Please try again.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+/**
+ * Artificial Speaker Modal (Redesigned)
+ *
+ * Premium glassmorphic modal for creating AI-generated speakers.
+ * Now includes emotion exaggeration control for Chatterbox TTS.
+ */
+function ArtificialSpeakerModal({ isOpen, onClose, onSubmit }) {
+    const [prompt, setPrompt] = useState('');
+    const [characteristics, setCharacteristics] = useState('');
+    const [exaggeration, setExaggeration] = useState(0.5);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     if (!isOpen) return null;
 
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!prompt.trim()) return;
+
+        setIsSubmitting(true);
+        try {
+            await onSubmit({
+                prompt: prompt.trim(),
+                speaker_characteristics: characteristics.trim(),
+                exaggeration,
+            });
+            setPrompt('');
+            setCharacteristics('');
+            setExaggeration(0.5);
+        } catch (err) {
+            console.error('Submit failed:', err);
+        }
+        setIsSubmitting(false);
+    };
+
     return (
-        <div className="modal-overlay">
-            <div className="modal-content">
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
-                    <h2>Add Artificial Speaker</h2>
-                    <button className="close-button" onClick={onClose} disabled={isLoading}>
-                        ×
-                    </button>
+                    <h3>🤖 Create AI Speaker</h3>
+                    <button className="modal-close" onClick={onClose}>✕</button>
                 </div>
-                
-                <form onSubmit={handleSubmit} className="speaker-form">
-                    <div className="form-group">
-                        <label htmlFor="speakerPrompt">
-                            Speaker Characteristics
-                            <span className="tooltip">
-                                ℹ️
-                                <span className="tooltip-text">
-                                    Describe the speaker's gender, personality, emotion, and topic of interest. 
-                                    Example: "A friendly female speaker with a calm demeanor discussing technology trends"
-                                </span>
-                            </span>
-                        </label>
+
+                <form onSubmit={handleSubmit}>
+                    <div className="modal-field">
+                        <label>What should they say?</label>
                         <textarea
-                            id="speakerPrompt"
-                            value={speakerPrompt}
-                            onChange={(e) => setSpeakerPrompt(e.target.value)}
-                            placeholder="Describe the artificial speaker (e.g., 'A confident male speaker with an energetic tone discussing business strategies')"
-                            rows={4}
-                            disabled={isLoading}
-                            required
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="Enter dialogue or prompt for the AI speaker..."
+                            rows={3}
                         />
                     </div>
 
-                    <div className="form-actions">
-                        <button 
-                            type="button" 
-                            onClick={onClose} 
-                            className="cancel-button"
-                            disabled={isLoading}
-                        >
+                    <div className="modal-field">
+                        <label>Voice Characteristics (optional)</label>
+                        <input
+                            type="text"
+                            value={characteristics}
+                            onChange={(e) => setCharacteristics(e.target.value)}
+                            placeholder="e.g., deep male voice, young female, British accent..."
+                        />
+                    </div>
+
+                    <div className="modal-field">
+                        <label>
+                            Emotion Exaggeration
+                            <span className="field-value">{Math.round(exaggeration * 100)}%</span>
+                        </label>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={exaggeration}
+                            onChange={(e) => setExaggeration(parseFloat(e.target.value))}
+                            className="modal-slider"
+                        />
+                        <div className="slider-labels">
+                            <span>Monotone</span>
+                            <span>Natural</span>
+                            <span>Expressive</span>
+                        </div>
+                    </div>
+
+                    <div className="modal-actions">
+                        <button type="button" className="btn-secondary" onClick={onClose}>
                             Cancel
                         </button>
-                        <button 
-                            type="submit" 
-                            className="submit-button"
-                            disabled={isLoading}
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={!prompt.trim() || isSubmitting}
                         >
-                            {isLoading ? 'Creating...' : 'Create Speaker'}
+                            {isSubmitting ? '⏳ Generating...' : '🎵 Generate'}
                         </button>
                     </div>
                 </form>

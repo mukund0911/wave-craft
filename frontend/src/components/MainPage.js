@@ -1,516 +1,706 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
-import '../styles/MainPage.css';
+import React, { Component } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import Header from './Header';
-import ArtificialSpeakerModal from './ArtificialSpeakerModal';
+import EmotionPicker from './EmotionPicker';
+import '../styles/MainPage.css';
+import '../styles/EmotionPicker.css';
 
-function MainPage() {
-    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-    // Use useLocation to get the passed state
-    const location = useLocation();
-    const { prediction, full_audio, conversations } = location.state || { };
-    // conversations = [conversations]
-    const [texts, setTexts] = useState([]);
-    const [newWord, setNewWord] = useState("");
-    const [showInput, setShowInput] = useState({ index: null, pos: null });
-    const [inputPosition, setInputPosition] = useState({ top: 0, left: 0 });
-    const [insertIndex, setInsertIndex] = useState({
-        textIndex: null,
-        wordIndex: null,
-    });
-    const inputRef = useRef(null);
-    const [audioUrl, setAudioUrl] = useState(null); // To store the Blob URL for the full_audio
-    
-    // Modal states
-    const [showArtificialSpeakerModal, setShowArtificialSpeakerModal] = useState(false);
-    const [insertAfterIndex, setInsertAfterIndex] = useState(null);
-    
-    // Final audio preview states
-    const [finalAudioUrl, setFinalAudioUrl] = useState(null);
-    const [finalAudioData, setFinalAudioData] = useState(null);
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [showFinalAudioPreview, setShowFinalAudioPreview] = useState(false);
-    
-    // Convert byte array to Blob URL for audio playback
-    useEffect(() => {
-        if (full_audio) {
-            // Assuming full_audio is base64 encoded, we first decode it
-            const byteString = atob(full_audio); // Decode base64
-            const byteArray = new Uint8Array(byteString.length);
-            for (let i = 0; i < byteString.length; i++) {
-                byteArray[i] = byteString.charCodeAt(i);
+/**
+ * MainPage — Transcript Editor with Emotion Tagging
+ *
+ * Features:
+ * - Speaker-wise transcript display
+ * - Click word to toggle delete (strikethrough)
+ * - Right-click word to open emotion picker
+ * - Add new words inline
+ * - Paralinguistic tags ([laugh], [sigh], etc.)
+ * - Generate modified audio with voice cloning
+ * - Audio playback per segment and full
+ */
+class MainPage extends Component {
+    constructor(props) {
+        super(props);
+
+        // Get data from navigation state
+        const locationState = props.location?.state || (typeof window !== 'undefined'
+            ? window.history.state?.usr : null) || {};
+
+        this.state = {
+            conversations: locationState.conversations || [],
+            fullAudio: locationState.full_audio || '',
+            // Track modifications per conversation
+            modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotions: {}, exaggeration: 0.5 } }
+            // Emotion picker
+            showEmotionPicker: false,
+            emotionPickerTarget: null, // { convKey, wordIndex }
+            emotionPickerPosition: { top: 0, left: 0 },
+            // Insert mode
+            insertMode: null, // { convKey, afterWordIndex }
+            insertText: '',
+            // Generation
+            isGenerating: false,
+            generatedAudio: null,
+            generatedStats: null,
+            // Playback
+            currentlyPlaying: null,
+        };
+
+        this.audioRef = React.createRef();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Data helpers
+    // ──────────────────────────────────────────────────
+
+    getConvData(convItem) {
+        const keys = Object.keys(convItem);
+        return { key: keys[0], data: convItem[keys[0]] };
+    }
+
+    getMods(convKey) {
+        return this.state.modifications[convKey] || {
+            deletedWords: new Set(),
+            insertedWords: [], // [{ afterIndex, text }]
+            emotions: {},      // { wordIndex: { type, intensity } }
+            exaggeration: 0.5,
+        };
+    }
+
+    setMods(convKey, mods) {
+        this.setState(prev => ({
+            modifications: {
+                ...prev.modifications,
+                [convKey]: mods,
             }
-            // Assuming full_audio is a byte array, convert it to a Blob
-            const audioBlob = new Blob([byteArray], { type: 'audio/wav' }); // or audio/wav, depending on the file type
-            const audioUrl = URL.createObjectURL(audioBlob);
-            setAudioUrl(audioUrl);
+        }));
+    }
+
+    // ──────────────────────────────────────────────────
+    // Word interactions
+    // ──────────────────────────────────────────────────
+
+    handleWordClick = (convKey, wordIndex) => {
+        const mods = { ...this.getMods(convKey) };
+        const deletedWords = new Set(mods.deletedWords);
+
+        if (deletedWords.has(wordIndex)) {
+            deletedWords.delete(wordIndex);
+        } else {
+            deletedWords.add(wordIndex);
         }
 
-        // Initialize conversation texts
-        const initialTextData = conversations.map((conv, index) => {
-            const key = Object.keys(conv)[0];
-            const conversation = conv[key];
-            const textArray = conversation.original.text.split(" ").map((word) => ({
-            word,
-            isStriked: false,
-            isNew: false,
-            }));
-            return {
-            conversationKey: key, // Store the conversation key (e.g., 'conv_0')
-            speaker: conversation.speaker,
-            textArray,
-            modified: conversation.modified,
-            };
+        mods.deletedWords = deletedWords;
+        this.setMods(convKey, mods);
+    };
+
+    handleWordRightClick = (e, convKey, wordIndex) => {
+        e.preventDefault();
+        const rect = e.target.getBoundingClientRect();
+        const mods = this.getMods(convKey);
+
+        this.setState({
+            showEmotionPicker: true,
+            emotionPickerTarget: { convKey, wordIndex },
+            emotionPickerPosition: {
+                top: rect.bottom + 8,
+                left: Math.min(rect.left, window.innerWidth - 340),
+            },
         });
-        setTexts(initialTextData);
-    }, [full_audio, conversations]);
-    
-
-    // Handle click to toggle strike-through
-    const handleWordClick = (textIndex, wordIndex) => {
-    const updatedTexts = [...texts];
-    updatedTexts[textIndex].textArray[wordIndex].isStriked =
-      !updatedTexts[textIndex].textArray[wordIndex].isStriked;
-    setTexts(updatedTexts);
     };
 
+    handleEmotionSelect = (emotion) => {
+        const { convKey, wordIndex } = this.state.emotionPickerTarget;
+        const mods = { ...this.getMods(convKey) };
+        const emotions = { ...mods.emotions };
 
-    // Handle new word input and insertion
-    const handleNewWordInput = (e) => {
-        setNewWord(e.target.value);
+        if (emotion === null) {
+            delete emotions[wordIndex];
+        } else {
+            emotions[wordIndex] = emotion;
+        }
+
+        mods.emotions = emotions;
+        this.setMods(convKey, mods);
     };
 
-    const handleInsertWord = (e) => {
-        if (e.key === "Enter" && newWord.trim() !== "") {
-          const updatedTexts = [...texts];
-          const { textIndex, wordIndex } = insertIndex;
-          updatedTexts[textIndex].textArray.splice(wordIndex + 1, 0, {
-            word: newWord,
-            isStriked: false,
-            isNew: true,
-          });
-          setTexts(updatedTexts);
-          setNewWord("");
-          setShowInput({ index: null, pos: null }); // Hide input box after insertion
+    handleCloseEmotionPicker = () => {
+        this.setState({ showEmotionPicker: false, emotionPickerTarget: null });
+    };
+
+    // ──────────────────────────────────────────────────
+    // Insert words
+    // ──────────────────────────────────────────────────
+
+    handleInsertClick = (convKey, afterWordIndex) => {
+        this.setState({
+            insertMode: { convKey, afterWordIndex },
+            insertText: '',
+        });
+    };
+
+    handleInsertSubmit = () => {
+        const { insertMode, insertText } = this.state;
+        if (!insertMode || !insertText.trim()) {
+            this.setState({ insertMode: null, insertText: '' });
+            return;
+        }
+
+        const mods = { ...this.getMods(insertMode.convKey) };
+        const insertedWords = [...(mods.insertedWords || [])];
+        insertedWords.push({
+            afterIndex: insertMode.afterWordIndex,
+            text: insertText.trim(),
+        });
+
+        mods.insertedWords = insertedWords;
+        this.setMods(insertMode.convKey, mods);
+        this.setState({ insertMode: null, insertText: '' });
+    };
+
+    handleInsertKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            this.handleInsertSubmit();
+        } else if (e.key === 'Escape') {
+            this.setState({ insertMode: null, insertText: '' });
         }
     };
 
-    // Show input box where the cursor is
-    const handleShowInput = (event, textIndex, wordIndex) => {
-        const rect = event.target.getBoundingClientRect();
-        setInputPosition({
-        top: rect.top + window.scrollY - 30, // Position the input ABOVE the clicked word
-        left: rect.left + window.scrollX,
+    // ──────────────────────────────────────────────────
+    // Add paralinguistic tag
+    // ──────────────────────────────────────────────────
+
+    handleAddParalinguistic = (convKey, afterWordIndex, tag) => {
+        const mods = { ...this.getMods(convKey) };
+        const insertedWords = [...(mods.insertedWords || [])];
+        insertedWords.push({
+            afterIndex: afterWordIndex,
+            text: tag,
+            isParalinguistic: true,
         });
-        setInsertIndex({ textIndex, wordIndex });
-        setShowInput({ index: textIndex, pos: wordIndex });
-        setTimeout(() => {
-        inputRef.current.focus();
-        }, 0);
+        mods.insertedWords = insertedWords;
+        this.setMods(convKey, mods);
     };
 
-    // Process and save the updated text for each conversation
-    const handleSubmit = async () => {
-        setIsProcessing(true);
-        setShowFinalAudioPreview(false);
-        
-        try {
-            const updatedConversations = [...texts].map((conversation) => {
-                // Build the updated text by excluding strike-through words
-                const updatedText = conversation.textArray
-                    .filter((wordObj) => !wordObj.isStriked)
-                    .map((wordObj) => wordObj.word)
-                    .join(" ");
+    // ──────────────────────────────────────────────────
+    // Exaggeration control
+    // ──────────────────────────────────────────────────
 
-                // Save the updated text in the 'modified' dictionary
-                conversation.modified.text = updatedText;
-                return conversation;
+    handleExaggerationChange = (convKey, value) => {
+        const mods = { ...this.getMods(convKey) };
+        mods.exaggeration = parseFloat(value);
+        this.setMods(convKey, mods);
+    };
+
+    // ──────────────────────────────────────────────────
+    // Build modified text
+    // ──────────────────────────────────────────────────
+
+    buildModifiedText(originalText, mods) {
+        const words = originalText.split(/\s+/);
+        const result = [];
+
+        for (let i = 0; i < words.length; i++) {
+            // Check for inserted words before this position
+            const insertsBefore = (mods.insertedWords || [])
+                .filter(ins => ins.afterIndex === i - 1);
+            for (const ins of insertsBefore) {
+                result.push(ins.text);
+            }
+
+            // Add word if not deleted
+            if (!mods.deletedWords.has(i)) {
+                result.push(words[i]);
+            }
+        }
+
+        // Insertions at the end
+        const insertsEnd = (mods.insertedWords || [])
+            .filter(ins => ins.afterIndex >= words.length - 1 || ins.afterIndex === -1);
+        for (const ins of insertsEnd) {
+            if (!result.includes(ins.text)) {
+                result.push(ins.text);
+            }
+        }
+
+        return result.join(' ');
+    }
+
+    buildEmotionsList(mods) {
+        const emotions = [];
+        for (const [wordIndex, emotion] of Object.entries(mods.emotions || {})) {
+            emotions.push({
+                type: emotion.type,
+                intensity: emotion.intensity || 0.5,
+                wordIndex: parseInt(wordIndex),
             });
+        }
+        return emotions;
+    }
 
-            // Prepare conversations data for the API - Include artificial speakers
-            const conversationsForAPI = updatedConversations.map((conv, index) => {
-                const conversationKey = conv.conversationKey || `conv_${index}`;
-                
-                // For artificial speakers, include their generated audio
-                const conversationData = {
-                    speaker: conv.speaker,
-                    original: {
-                        text: conv.textArray.map(w => w.word).join(" "),
-                        start: 0,
-                        end: 0
-                    },
-                    modified: {
-                        text: conv.modified.text
+    // ──────────────────────────────────────────────────
+    // Playback
+    // ──────────────────────────────────────────────────
+
+    playSegmentAudio = (convKey, audioB64) => {
+        if (this.state.currentlyPlaying === convKey) {
+            // Stop
+            if (this.audioRef.current) {
+                this.audioRef.current.pause();
+                this.audioRef.current.currentTime = 0;
+            }
+            this.setState({ currentlyPlaying: null });
+            return;
+        }
+
+        const audio = this.audioRef.current || new Audio();
+        this.audioRef.current = audio;
+        audio.src = `data:audio/wav;base64,${audioB64}`;
+        audio.onended = () => this.setState({ currentlyPlaying: null });
+        audio.play();
+        this.setState({ currentlyPlaying: convKey });
+    };
+
+    // ──────────────────────────────────────────────────
+    // Generate modified audio
+    // ──────────────────────────────────────────────────
+
+    handleGenerate = async () => {
+        this.setState({ isGenerating: true, generatedAudio: null });
+
+        try {
+            const conversationsUpdated = this.state.conversations.map(convItem => {
+                const { key, data } = this.getConvData(convItem);
+                const mods = this.getMods(key);
+                const modifiedText = this.buildModifiedText(data.original.text, mods);
+                const emotions = this.buildEmotionsList(mods);
+
+                return {
+                    [key]: {
+                        speaker: data.speaker,
+                        original: data.original,
+                        modified: {
+                            text: modifiedText,
+                            emotions: emotions,
+                            exaggeration: mods.exaggeration || 0.5,
+                        }
                     }
                 };
-
-                // Include AI-generated audio if available
-                if (conv.artificial && conv.audio_base64) {
-                    conversationData.original.speaker_audio = conv.audio_base64;
-                    conversationData.artificial = true;
-                    conversationData.speaker_characteristics = conv.speaker_characteristics;
-                } else if (conversations[index] && conversations[index][Object.keys(conversations[index])[0]]) {
-                    // Use original transcribed audio
-                    const originalConv = conversations[index][Object.keys(conversations[index])[0]];
-                    conversationData.original = {
-                        ...conversationData.original,
-                        ...originalConv.original
-                    };
-                }
-
-                return { [conversationKey]: conversationData };
             });
 
-            // Create FormData for the request
             const formData = new FormData();
-            const conversationsBlob = new Blob([JSON.stringify(conversationsForAPI)], { type: "application/json" });
-            formData.append("conversationsUpdated", conversationsBlob);
+            formData.append('conversations_updated', JSON.stringify(conversationsUpdated));
+            formData.append('full_audio', this.state.fullAudio);
 
-            // Add full audio if available
-            if (full_audio) {
-                const audioBlob = base64ToBlob(full_audio, 'audio/wav');
-                formData.append("full_audio", audioBlob, "full_audio.wav");
-            }
-
-            // Send request to backend
-            const response = await axios.post(apiUrl + '/conversations_modified', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
+            const response = await axios.post(
+                `${apiUrl}/conversations_modified`,
+                formData,
+                {
+                    headers: { 'content-type': 'multipart/form-data' },
+                    withCredentials: true,
                 }
+            );
+
+            this.setState({
+                isGenerating: false,
+                generatedAudio: response.data.modified_audio,
+                generatedStats: response.data.stats,
             });
 
-            if (response.data && response.data.modified_audio) {
-                // Create audio blob and URL for preview
-                const finalAudioBlob = base64ToBlob(response.data.modified_audio, 'audio/wav');
-                const finalAudioUrl = URL.createObjectURL(finalAudioBlob);
-                
-                setFinalAudioData({
-                    audioBase64: response.data.modified_audio,
-                    audioBlob: finalAudioBlob,
-                    duration: response.data.duration_seconds,
-                    sampleRate: response.data.sample_rate,
-                    segmentsCloned: response.data.segments_cloned,
-                    segmentsProcessed: response.data.segments_processed,
-                    voiceCloningEnabled: response.data.voice_cloning_enabled
-                });
-                setFinalAudioUrl(finalAudioUrl);
-                setShowFinalAudioPreview(true);
-                
-                console.log('Final audio generated successfully:', response.data);
-            }
-        } catch (error) {
-            console.error('Error generating final audio:', error);
-            alert('Failed to generate final audio. Please try again.');
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-
-    // Utility function to convert base64 string to Blob
-    const base64ToBlob = (base64Data, contentType) => {
-        const byteCharacters = atob(base64Data); // Decode base64 string
-        const byteArrays = [];
-    
-        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-        const slice = byteCharacters.slice(offset, offset + 512);
-        const byteNumbers = new Array(slice.length);
-        for (let i = 0; i < slice.length; i++) {
-            byteNumbers[i] = slice.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        byteArrays.push(byteArray);
-        }
-    
-        return new Blob(byteArrays, { type: contentType });
-    };
-
-    // Download final audio function
-    const handleDownloadFinalAudio = () => {
-        if (finalAudioData && finalAudioData.audioBlob) {
-            const downloadUrl = URL.createObjectURL(finalAudioData.audioBlob);
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = `final_audio_${new Date().getTime()}.wav`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(downloadUrl);
-        }
-    };
-
-    // Format duration for display
-    const formatDuration = (seconds) => {
-        if (!seconds) return '0:00';
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = Math.floor(seconds % 60);
-        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-    };
-
-    // Handler for adding conversations
-    const handleAddConversation = (index) => {
-        const updatedTexts = [...texts];
-        const newConversation = {
-            conversationKey: `conv_${texts.length}`,
-            speaker: "New",
-            textArray: [{
-                word: "New conversation",
-                isStriked: false,
-                isNew: true
-            }],
-            modified: { text: "New conversation" }
-        };
-        updatedTexts.splice(index + 1, 0, newConversation);
-        setTexts(updatedTexts);
-    };
-
-    // Handler for adding artificial speaker
-    const handleAddArtificialSpeaker = (index) => {
-        setInsertAfterIndex(index);
-        setShowArtificialSpeakerModal(true);
-    };
-
-    // Submit artificial speaker request
-    const handleArtificialSpeakerSubmit = async (requestData) => {
-        try {
-            const response = await axios.post(`${apiUrl}/add_artificial_speaker`, requestData, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+        } catch (err) {
+            console.error('Generation error:', err);
+            this.setState({
+                isGenerating: false,
             });
-
-            if (response.data && response.data.conversation_entry) {
-                const newConversation = response.data.conversation_entry;
-                
-                // Convert conversation entry to the format expected by the UI
-                const formattedConversation = {
-                    conversationKey: `conv_ai_${Date.now()}`,
-                    speaker: newConversation.speaker,
-                    textArray: [{
-                        word: newConversation.original.text,
-                        isStriked: false,
-                        isNew: true
-                    }],
-                    modified: newConversation.modified,
-                    artificial: true,
-                    speaker_characteristics: newConversation.speaker_characteristics,
-                    audio_base64: newConversation.original.speaker_audio
-                };
-
-                // Insert the new conversation after the specified index
-                const updatedTexts = [...texts];
-                const insertIndex = insertAfterIndex !== null ? insertAfterIndex + 1 : texts.length;
-                updatedTexts.splice(insertIndex, 0, formattedConversation);
-                setTexts(updatedTexts);
-
-                console.log('Artificial speaker created:', response.data);
-            }
-        } catch (error) {
-            console.error('Error creating artificial speaker:', error);
-            throw error;
+            alert(err.response?.data?.error || 'Failed to generate audio. Please try again.');
         }
     };
 
-     return (
-        <div className="main-page">
-            <Header />
-            <div className="speech-results">
-                <h2>Audio Analysis Result</h2>
-                <p>The uploaded audio is classified as: <strong>{prediction}</strong></p>
+    // ──────────────────────────────────────────────────
+    // Download
+    // ──────────────────────────────────────────────────
 
-                {audioUrl && (
-                    <div className="audio-player">
-                        <audio controls>
-                            <source src={audioUrl} type="audio/wav" />
-                            Your browser does not support the audio element.
-                        </audio>
-                    </div>
-                )}
+    handleDownload = () => {
+        const { generatedAudio } = this.state;
+        if (!generatedAudio) return;
 
-                <p>Here's the audio transcript:</p>
+        const bytes = atob(generatedAudio);
+        const array = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) {
+            array[i] = bytes.charCodeAt(i);
+        }
+        const blob = new Blob([array], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'wavecraft_modified.wav';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
-                <div className="conversation-container">
-                    {texts.map((conversation, textIndex) => (
-                        <React.Fragment key={textIndex}>
-                            <div className="conversation-block">
-                                <div className="text-block">
-                                    <div className="centered-text">
-                                        <span className={`speaker-label ${conversation.artificial ? 'artificial-speaker' : ''}`}>
-                                            Speaker {conversation.speaker}:
-                                            {conversation.artificial && <span className="ai-badge">AI</span>}
-                                        </span>
-                                        {conversation.textArray.map((item, wordIndex) => (
-                                            <span key={wordIndex} style={{ position: "relative" }}>
-                                                <span
-                                                    onClick={() => handleWordClick(textIndex, wordIndex)}
-                                                    style={{
-                                                        textDecoration: item.isStriked ? "line-through" : "none",
-                                                        color: item.isStriked
-                                                            ? "red"
-                                                            : item.isNew
-                                                                ? "green"
-                                                                : "black",
-                                                        cursor: "pointer",
-                                                    }}
-                                                >
-                                                    {item.word}
-                                                </span>{" "}
-                                                <span
-                                                    onClick={(e) => handleShowInput(e, textIndex, wordIndex)}
-                                                    style={{
-                                                        display: "inline-block",
-                                                        width: "10px",
-                                                        height: "20px",
-                                                        cursor: "text",
-                                                    }}
-                                                ></span>
-                                            </span>
-                                        ))}
+    handlePlayGenerated = () => {
+        const { generatedAudio } = this.state;
+        if (!generatedAudio) return;
+
+        const audio = this.audioRef.current || new Audio();
+        this.audioRef.current = audio;
+        audio.src = `data:audio/wav;base64,${generatedAudio}`;
+        audio.play();
+    };
+
+    // ──────────────────────────────────────────────────
+    // Stats
+    // ──────────────────────────────────────────────────
+
+    getEditStats() {
+        let modified = 0, deleted = 0, inserted = 0, emotions = 0;
+
+        for (const [key, mods] of Object.entries(this.state.modifications)) {
+            deleted += (mods.deletedWords?.size || 0);
+            inserted += (mods.insertedWords?.length || 0);
+            emotions += Object.keys(mods.emotions || {}).length;
+            if (deleted > 0 || inserted > 0 || emotions > 0) modified++;
+        }
+
+        return { modified, deleted, inserted, emotions };
+    }
+
+    // ──────────────────────────────────────────────────
+    // Render
+    // ──────────────────────────────────────────────────
+
+    renderWords(convKey, text, mods) {
+        const words = text.split(/\s+/);
+        const elements = [];
+        const { insertMode } = this.state;
+
+        // Insert input at beginning (afterWordIndex === -1)
+        if (insertMode && insertMode.convKey === convKey && insertMode.afterWordIndex === -1) {
+            elements.push(
+                <input
+                    key="input-start"
+                    type="text"
+                    className="insert-input"
+                    placeholder="Type new words…"
+                    value={this.state.insertText}
+                    onChange={(e) => this.setState({ insertText: e.target.value })}
+                    onKeyDown={this.handleInsertKeyDown}
+                    onBlur={this.handleInsertSubmit}
+                    autoFocus
+                    style={{
+                        background: 'rgba(5, 150, 105, 0.08)',
+                        border: '1px solid rgba(5, 150, 105, 0.25)',
+                        borderRadius: '6px',
+                        padding: '3px 8px',
+                        color: '#059669',
+                        fontSize: '0.9rem',
+                        outline: 'none',
+                        minWidth: '120px',
+                        fontFamily: 'inherit',
+                    }}
+                />
+            );
+            elements.push(<span key="sp-ins-start"> </span>);
+        }
+
+        for (let i = 0; i < words.length; i++) {
+            // Inserted words before this position
+            const insertsBefore = (mods.insertedWords || [])
+                .filter(ins => ins.afterIndex === i - 1);
+            for (const ins of insertsBefore) {
+                if (ins.isParalinguistic) {
+                    elements.push(
+                        <span key={`para-${i}-${ins.text}`} className="paralinguistic-tag">
+                            {ins.text}
+                        </span>
+                    );
+                } else {
+                    elements.push(
+                        <span key={`ins-${i}-${ins.text}`} className="word inserted">
+                            {ins.text}{' '}
+                        </span>
+                    );
+                }
+            }
+
+            // The word itself
+            const isDeleted = mods.deletedWords.has(i);
+            const emotion = mods.emotions[i];
+            let className = 'word';
+            if (isDeleted) className += ' deleted';
+            if (emotion) className += ` has-emotion ${emotion.type}`;
+
+            elements.push(
+                <span
+                    key={`w-${i}`}
+                    className={className}
+                    onClick={() => this.handleWordClick(convKey, i)}
+                    onContextMenu={(e) => this.handleWordRightClick(e, convKey, i)}
+                    onDoubleClick={() => this.handleInsertClick(convKey, i)}
+                    title={isDeleted ? 'Click to restore' : 'Click to delete • Right-click for emotion • Double-click to insert after'}
+                >
+                    {words[i]}
+                    {emotion && !emotion.isParalinguistic && (
+                        <span className={`emotion-chip ${emotion.type}`}>
+                            {emotion.type}
+                        </span>
+                    )}
+                </span>
+            );
+
+            elements.push(<span key={`sp-${i}`}> </span>);
+
+            // Show insert input after this word
+            if (insertMode && insertMode.convKey === convKey && insertMode.afterWordIndex === i) {
+                elements.push(
+                    <input
+                        key={`input-${i}`}
+                        type="text"
+                        className="insert-input"
+                        placeholder="Type new words…"
+                        value={this.state.insertText}
+                        onChange={(e) => this.setState({ insertText: e.target.value })}
+                        onKeyDown={this.handleInsertKeyDown}
+                        onBlur={this.handleInsertSubmit}
+                        autoFocus
+                        style={{
+                            background: 'rgba(5, 150, 105, 0.08)',
+                            border: '1px solid rgba(5, 150, 105, 0.25)',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            color: '#059669',
+                            fontSize: '0.9rem',
+                            outline: 'none',
+                            minWidth: '120px',
+                            fontFamily: 'inherit',
+                        }}
+                    />
+                );
+                elements.push(<span key={`sp-ins-${i}`}> </span>);
+            }
+        }
+
+        return elements;
+    }
+
+    getSpeakerClass(speaker) {
+        const map = { A: 'a', B: 'b', C: 'c', D: 'd', E: 'e' };
+        return `speaker-${map[speaker] || 'a'}`;
+    }
+
+    render() {
+        const {
+            conversations, showEmotionPicker, emotionPickerTarget,
+            emotionPickerPosition, isGenerating, generatedAudio,
+        } = this.state;
+
+        const stats = this.getEditStats();
+        const hasChanges = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0;
+
+        return (
+            <div className="main-page">
+                {/* Same Header as landing page */}
+                <Header />
+
+                {/* Conversations */}
+                <div className="main-content">
+                    {conversations.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)' }}>
+                            <p style={{ fontSize: '1.2rem', marginBottom: '8px' }}>No transcript loaded</p>
+                            <p>Upload an audio file to get started.</p>
+                            <Link to="/" className="btn-primary" style={{
+                                display: 'inline-flex', marginTop: '20px',
+                                textDecoration: 'none'
+                            }}>
+                                Go to Upload
+                            </Link>
+                        </div>
+                    ) : conversations.map((convItem, idx) => {
+                        const { key, data } = this.getConvData(convItem);
+                        const mods = this.getMods(key);
+                        const isModified = (mods.deletedWords?.size > 0) ||
+                            (mods.insertedWords?.length > 0) ||
+                            Object.keys(mods.emotions || {}).length > 0;
+
+                        return (
+                            <div
+                                key={key}
+                                className="speaker-section"
+                                style={{ animationDelay: `${idx * 0.05}s` }}
+                            >
+                                <div className="speaker-header">
+                                    <div className={`speaker-avatar ${this.getSpeakerClass(data.speaker)}`}>
+                                        {data.speaker}
                                     </div>
-                                </div>
-                                <div className="conversation-actions">
-                                    {conversation.audio_base64 && (
-                                        <audio 
-                                            controls 
-                                            className="conversation-audio"
-                                            src={`data:audio/wav;base64,${conversation.audio_base64}`}
-                                        />
+                                    <span className="speaker-name">
+                                        Speaker {data.speaker}
+                                    </span>
+                                    {data.original?.start !== undefined && (
+                                        <span className="speaker-time">
+                                            {formatTime(data.original.start)} — {formatTime(data.original.end)}
+                                        </span>
                                     )}
                                 </div>
+
+                                <div className={`transcript-block ${isModified ? 'modified' : ''}`}>
+                                    <div className="transcript-text">
+                                        {this.renderWords(key, data.original.text, mods)}
+                                    </div>
+
+                                    <div className="transcript-actions">
+                                        <button
+                                            className="action-btn"
+                                            onClick={() => this.handleInsertClick(key, -1)}
+                                            title="Insert text at beginning"
+                                        >
+                                            ➕ Insert
+                                        </button>
+                                        <button
+                                            className={`action-btn ${Object.keys(mods.emotions || {}).length > 0 ? 'active' : ''}`}
+                                            onClick={(e) => this.handleWordRightClick(e, key, 0)}
+                                            title="Add emotion to first word"
+                                        >
+                                            😊 Emotion
+                                        </button>
+
+                                        {data.original?.speaker_audio && (
+                                            <button
+                                                className="play-btn"
+                                                onClick={() => this.playSegmentAudio(key, data.original.speaker_audio)}
+                                            >
+                                                {this.state.currentlyPlaying === key ? '⏹ Stop' : '▶ Play'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                            <div className="conversation-controls">
-                                <button
-                                    className="add-conversation-button regular"
-                                    onClick={() => handleAddConversation(textIndex)}
-                                    title="Add new conversation"
-                                >
-                                    + Add Conversation
-                                </button>
-                                <button
-                                    className="add-conversation-button ai"
-                                    onClick={() => handleAddArtificialSpeaker(textIndex)}
-                                    title="Add AI speaker"
-                                >
-                                    🤖 Add AI Speaker
-                                </button>
-                            </div>
-                        </React.Fragment>
-                    ))}
+                        );
+                    })}
                 </div>
 
-                {/* Floating input box */}
-                {showInput.index !== null && (
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={newWord}
-                        onChange={handleNewWordInput}
-                        onKeyDown={handleInsertWord}
-                        style={{
-                            position: "absolute",
-                            top: `${inputPosition.top}px`,
-                            left: `${inputPosition.left}px`,
-                            zIndex: 10,
-                        }}
-                        placeholder="Enter new word"
-                    />
+                {/* Bottom Generate Bar */}
+                {conversations.length > 0 && (
+                    <div className="bottom-bar">
+                        <div className="bottom-bar-info">
+                            <span className="bottom-bar-stat">
+                                <span className="dot modified"></span>
+                                {stats.modified} segments
+                            </span>
+                            <span className="bottom-bar-stat">
+                                <span className="dot deleted"></span>
+                                {stats.deleted} deleted
+                            </span>
+                            <span className="bottom-bar-stat">
+                                <span className="dot inserted"></span>
+                                {stats.inserted} inserted
+                            </span>
+                            <span className="bottom-bar-stat">
+                                <span className="dot emotion"></span>
+                                {stats.emotions} emotions
+                            </span>
+                        </div>
+
+                        <button
+                            className="generate-btn"
+                            onClick={this.handleGenerate}
+                            disabled={isGenerating}
+                        >
+                            {isGenerating ? (
+                                <>⏳ Generating...</>
+                            ) : (
+                                <>🎵 Generate Modified Audio</>
+                            )}
+                        </button>
+                    </div>
                 )}
 
-                <button
-                    onClick={handleSubmit}
-                    disabled={isProcessing}
-                    style={{
-                        marginTop: "20px",
-                        padding: "10px 20px",
-                        fontSize: "16px",
-                        backgroundColor: isProcessing ? "#666" : "#000",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: "5px",
-                        cursor: isProcessing ? "not-allowed" : "pointer"
-                    }}
-                >
-                    {isProcessing ? "Processing..." : "Submit"}
-                </button>
-
-                {/* Final Audio Preview */}
-                {showFinalAudioPreview && finalAudioUrl && (
-                    <div className="final-audio-preview" style={{
-                        marginTop: "30px",
-                        padding: "20px",
-                        border: "2px solid #4CAF50",
-                        borderRadius: "10px",
-                        backgroundColor: "#f9f9f9"
-                    }}>
-                        <h3 style={{ color: "#4CAF50", marginBottom: "15px" }}>
-                            🎉 Final Audio Ready!
-                        </h3>
-                        
-                        <div className="audio-info" style={{ marginBottom: "15px" }}>
-                            <p><strong>Duration:</strong> {formatDuration(finalAudioData?.duration)}</p>
-                            <p><strong>Quality:</strong> {finalAudioData?.sampleRate || 22050} Hz</p>
-                            {finalAudioData?.segmentsProcessed && (
-                                <p><strong>Segments:</strong> {finalAudioData.segmentsProcessed} processed</p>
-                            )}
-                            {finalAudioData?.voiceCloningEnabled && finalAudioData?.segmentsCloned > 0 && (
-                                <p><strong>Voice Cloning:</strong> ✅ {finalAudioData.segmentsCloned} segment(s) regenerated</p>
-                            )}
-                        </div>
-
-                        <div className="audio-controls" style={{ 
-                            display: "flex", 
-                            alignItems: "center", 
-                            gap: "15px",
-                            flexWrap: "wrap"
-                        }}>
-                            <audio 
-                                controls 
-                                style={{ flex: "1", minWidth: "300px" }}
-                                src={finalAudioUrl}
-                            >
-                                Your browser does not support the audio element.
-                            </audio>
-                            
-                            <button
-                                onClick={handleDownloadFinalAudio}
-                                style={{
-                                    padding: "10px 20px",
-                                    fontSize: "14px",
-                                    backgroundColor: "#4CAF50",
-                                    color: "#fff",
-                                    border: "none",
-                                    borderRadius: "5px",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px"
-                                }}
-                            >
-                                📥 Download Audio
-                            </button>
-                        </div>
-
-                        <div className="processing-info" style={{
-                            marginTop: "15px",
-                            fontSize: "12px",
-                            color: "#666",
-                            fontStyle: "italic"
-                        }}>
-                            <p>✅ Audio processed with style preservation and quality enhancement</p>
+                {/* Loading Overlay */}
+                {isGenerating && (
+                    <div className="loading-overlay">
+                        <div className="loading-spinner"></div>
+                        <div className="loading-text">
+                            Generating modified audio with voice cloning...
                         </div>
                     </div>
                 )}
-            </div>
 
-            <ArtificialSpeakerModal
-                isOpen={showArtificialSpeakerModal}
-                onClose={() => setShowArtificialSpeakerModal(false)}
-                onSubmit={handleArtificialSpeakerSubmit}
-                conversationHistory={conversations}
-            />
-        </div>
-    );
+                {/* Download Panel */}
+                {generatedAudio && (
+                    <div className="download-panel">
+                        <div className="download-card">
+                            <h3>✨ Audio Generated!</h3>
+                            <p>
+                                Modified audio is ready.
+                                Play to preview or download the file.
+                            </p>
+                            <div className="download-actions">
+                                <button className="btn-secondary" onClick={this.handlePlayGenerated}>
+                                    ▶ Play
+                                </button>
+                                <button className="btn-primary" onClick={this.handleDownload}>
+                                    ⬇ Download WAV
+                                </button>
+                            </div>
+                            <button
+                                style={{
+                                    marginTop: '16px',
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem',
+                                }}
+                                onClick={() => this.setState({ generatedAudio: null })}
+                            >
+                                ← Back to Editor
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Emotion Picker Popover */}
+                {showEmotionPicker && emotionPickerTarget && (
+                    <>
+                        <div
+                            style={{
+                                position: 'fixed', inset: 0, zIndex: 199,
+                                background: 'transparent',
+                            }}
+                            onClick={this.handleCloseEmotionPicker}
+                        />
+                        <EmotionPicker
+                            position={emotionPickerPosition}
+                            onSelect={this.handleEmotionSelect}
+                            onClose={this.handleCloseEmotionPicker}
+                            currentEmotion={
+                                this.getMods(emotionPickerTarget.convKey)
+                                    .emotions[emotionPickerTarget.wordIndex]
+                            }
+                        />
+                    </>
+                )}
+
+                {/* Hidden audio element */}
+                <audio ref={this.audioRef} style={{ display: 'none' }} />
+            </div>
+        );
+    }
 }
 
-export default MainPage;
+// Helper: format seconds to MM:SS
+function formatTime(seconds) {
+    if (seconds == null) return '';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Wrapper to pass location via hook (for navigation state)
+function MainPageWrapper(props) {
+    // Read navigation state from window.history for class component
+    return <MainPage {...props} location={window.history.state ? { state: window.history.state.usr } : {}} />;
+}
+
+export default MainPageWrapper;

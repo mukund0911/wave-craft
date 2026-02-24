@@ -1,186 +1,232 @@
-import React, { useState } from 'react';
-import '../styles/UploadButton.css';
+import React, { Component } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { useNavigate  } from 'react-router-dom';
+import '../styles/LandingPage.css';
 
-function UploadButton() {
-    const navigate = useNavigate();
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [statusMessage, setStatusMessage] = useState('');
-    const [progress, setProgress] = useState(0);
+const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-    const pollStatus = async (jobId, apiUrl) => {
-        const maxAttempts = 120; // 2 minutes max (polling every 1 second)
+/**
+ * Premium Upload Button with drag-and-drop zone and animated progress.
+ */
+class UploadButtonClass extends Component {
+    constructor(props) {
+        super(props);
+        this.state = {
+            isDragging: false,
+            isUploading: false,
+            progress: 0,
+            statusText: '',
+            error: null,
+        };
+        this.fileInputRef = React.createRef();
+    }
+
+    handleDragOver = (e) => {
+        e.preventDefault();
+        this.setState({ isDragging: true });
+    };
+
+    handleDragLeave = (e) => {
+        e.preventDefault();
+        this.setState({ isDragging: false });
+    };
+
+    handleDrop = (e) => {
+        e.preventDefault();
+        this.setState({ isDragging: false });
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            this.uploadFile(files[0]);
+        }
+    };
+
+    handleClick = () => {
+        this.fileInputRef.current.click();
+    };
+
+    handleFileChange = (e) => {
+        if (e.target.files.length > 0) {
+            this.uploadFile(e.target.files[0]);
+        }
+    };
+
+    uploadFile = async (file) => {
+        this.setState({
+            isUploading: true,
+            progress: 10,
+            statusText: 'Uploading audio...',
+            error: null,
+        });
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await axios.post(`${apiUrl}/upload`, formData, {
+                headers: { 'content-type': 'multipart/form-data' },
+                withCredentials: true,
+                onUploadProgress: (progressEvent) => {
+                    const pct = Math.round((progressEvent.loaded * 40) / progressEvent.total) + 10;
+                    this.setState({ progress: pct, statusText: 'Uploading audio...' });
+                },
+            });
+
+            if (response.data.status === 'completed') {
+                // Immediate result (cached)
+                this.setState({ progress: 100, statusText: 'Complete!' });
+                setTimeout(() => {
+                    this.props.navigate('/result', {
+                        state: {
+                            conversations: response.data.conversations,
+                            full_audio: response.data.full_audio,
+                        },
+                    });
+                }, 400);
+            } else if (response.data.job_id) {
+                // Async — poll for status
+                this.setState({ progress: 50, statusText: 'Transcribing audio...' });
+                this.pollStatus(response.data.job_id);
+            }
+        } catch (err) {
+            console.error('Upload error:', err);
+            this.setState({
+                isUploading: false,
+                error: err.response?.data?.error || 'Upload failed. Please try again.',
+                progress: 0,
+                statusText: '',
+            });
+        }
+    };
+
+    pollStatus = async (jobId) => {
         let attempts = 0;
+        const maxAttempts = 120;
 
         const poll = async () => {
+            if (attempts >= maxAttempts) {
+                this.setState({
+                    isUploading: false,
+                    error: 'Processing timed out. Please try again.',
+                    progress: 0,
+                });
+                return;
+            }
+
             try {
-                const response = await axios.get(`${apiUrl}/status/${jobId}`);
+                const response = await axios.get(`${apiUrl}/status/${jobId}`, {
+                    withCredentials: true,
+                });
 
-                if (response.status === 200 && response.data.status === 'completed') {
-                    // Processing complete
-                    setStatusMessage('Transcription complete! Loading results...');
-                    setProgress(100);
-                    const { prediction, conversations, full_audio } = response.data;
-
-                    // Navigate to result page
+                if (response.data.status === 'completed') {
+                    this.setState({ progress: 100, statusText: 'Complete!' });
                     setTimeout(() => {
-                        navigate('/result', {
-                            state: { prediction, full_audio, conversations }
+                        this.props.navigate('/result', {
+                            state: {
+                                conversations: response.data.conversations,
+                                full_audio: response.data.full_audio,
+                            },
                         });
-                    }, 500);
+                    }, 400);
                     return;
                 }
 
-                // Update status message
-                const status = response.data.status || 'processing';
-                if (status === 'queued') {
-                    setStatusMessage('Queued for processing...');
-                    setProgress(10);
-                } else if (status === 'processing') {
-                    setStatusMessage('Transcribing audio...');
-                    setProgress(Math.min(30 + attempts * 2, 90)); // Simulate progress
+                if (response.data.status === 'error') {
+                    this.setState({
+                        isUploading: false,
+                        error: response.data.error || 'Processing failed.',
+                        progress: 0,
+                    });
+                    return;
                 }
 
+                // Still processing
                 attempts++;
-                if (attempts >= maxAttempts) {
-                    throw new Error('Transcription timed out. Please try again.');
-                }
-
-                // Poll again after 1 second
+                const progressVal = Math.min(50 + (attempts / maxAttempts) * 45, 95);
+                this.setState({
+                    progress: progressVal,
+                    statusText: 'Transcribing audio...',
+                });
                 setTimeout(poll, 1000);
-            } catch (error) {
-                console.error('Error polling status:', error);
-                setStatusMessage('Error processing file. Please try again.');
-                setIsProcessing(false);
-                alert('Failed to process audio. Please try again.');
+            } catch (err) {
+                attempts++;
+                if (attempts < maxAttempts) {
+                    setTimeout(poll, 2000);
+                } else {
+                    this.setState({
+                        isUploading: false,
+                        error: 'Connection lost. Please try again.',
+                        progress: 0,
+                    });
+                }
             }
         };
 
         poll();
     };
 
-    const handleFileInput = async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
+    render() {
+        const { isDragging, isUploading, progress, statusText, error } = this.state;
 
-        event.preventDefault();
-        setIsProcessing(true);
-        setStatusMessage('Uploading file...');
-        setProgress(5);
+        return (
+            <div>
+                {!isUploading ? (
+                    <div
+                        className={`upload-dropzone ${isDragging ? 'dragover' : ''}`}
+                        onDragOver={this.handleDragOver}
+                        onDragLeave={this.handleDragLeave}
+                        onDrop={this.handleDrop}
+                        onClick={this.handleClick}
+                    >
+                        <span className="upload-icon">
+                            {isDragging ? '📥' : '🎧'}
+                        </span>
+                        <div className="upload-text">
+                            {isDragging
+                                ? 'Drop your audio here'
+                                : 'Drop audio file or click to browse'}
+                        </div>
+                        <div className="upload-subtext">
+                            Supports WAV, MP3, M4A, FLAC, OGG
+                        </div>
+                        <input
+                            type="file"
+                            ref={this.fileInputRef}
+                            onChange={this.handleFileChange}
+                            accept="audio/*"
+                            style={{ display: 'none' }}
+                        />
+                    </div>
+                ) : (
+                    <div className="upload-progress">
+                        <div className="progress-bar-wrapper">
+                            <div
+                                className="progress-bar-fill"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                        <div className="progress-text">{statusText}</div>
+                    </div>
+                )}
 
-        const apiUrl = process.env.REACT_APP_API_URL || "http://127.0.0.1:5000";
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileName', file.name);
-
-        const config = {
-            headers: {
-                'content-type': 'multipart/form-data',
-            },
-            withCredentials: true
-        };
-
-        try {
-            const response = await axios.post(`${apiUrl}/upload`, formData, config);
-
-            // Check if result was cached
-            if (response.data.cached) {
-                setStatusMessage('Retrieved from cache!');
-                setProgress(100);
-                const { prediction, conversations, full_audio } = response.data;
-
-                setTimeout(() => {
-                    navigate('/result', {
-                        state: { prediction, full_audio, conversations }
-                    });
-                }, 500);
-            } else if (response.status === 202) {
-                // Async processing started
-                const jobId = response.data.job_id;
-                setStatusMessage('File uploaded. Processing...');
-                setProgress(20);
-
-                // Start polling
-                pollStatus(jobId, apiUrl);
-            }
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            setStatusMessage('Upload failed. Please try again.');
-            setIsProcessing(false);
-            alert('Failed to upload file. Please try again.');
-        }
-    };
-    
-    const handleButtonClick = () => {
-        document.getElementById('file-input').click();
-    };
-
-    return (
-        <div className="upload-container">
-            <div className="inner">
-                <button
-                    className="upload-button"
-                    onClick={handleButtonClick}
-                    disabled={isProcessing}
-                    style={{
-                        opacity: isProcessing ? 0.6 : 1,
-                        cursor: isProcessing ? 'not-allowed' : 'pointer'
-                    }}
-                >
-                    {isProcessing ? 'Processing...' : 'Choose audio file to upload'}
-                </button>
-                <input
-                    hidden
-                    type="file"
-                    id="file-input"
-                    className="file-input"
-                    onChange={handleFileInput}
-                    accept=".mp3, .wav"
-                    disabled={isProcessing}
-                />
+                {error && (
+                    <div style={{
+                        marginTop: '16px',
+                        color: '#ef4444',
+                        fontSize: '0.875rem',
+                        textAlign: 'center',
+                    }}>
+                        {error}
+                    </div>
+                )}
             </div>
+        );
+    }
+}
 
-            {isProcessing && (
-                <div className="processing-status" style={{
-                    marginTop: '20px',
-                    textAlign: 'center'
-                }}>
-                    <div style={{
-                        marginBottom: '10px',
-                        fontSize: '14px',
-                        color: '#555'
-                    }}>
-                        {statusMessage}
-                    </div>
-                    <div style={{
-                        width: '100%',
-                        maxWidth: '400px',
-                        height: '8px',
-                        backgroundColor: '#e0e0e0',
-                        borderRadius: '4px',
-                        overflow: 'hidden',
-                        margin: '0 auto'
-                    }}>
-                        <div style={{
-                            width: `${progress}%`,
-                            height: '100%',
-                            backgroundColor: '#4CAF50',
-                            transition: 'width 0.3s ease',
-                            borderRadius: '4px'
-                        }} />
-                    </div>
-                    <div style={{
-                        marginTop: '5px',
-                        fontSize: '12px',
-                        color: '#888'
-                    }}>
-                        {progress}%
-                    </div>
-                </div>
-            )}
-        </div>
-    );
+// Wrapper to inject useNavigate hook into class component
+function UploadButton() {
+    const navigate = useNavigate();
+    return <UploadButtonClass navigate={navigate} />;
 }
 
 export default UploadButton;
