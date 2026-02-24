@@ -31,8 +31,8 @@ whisperx_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch>=2.8.0",
-        "torchaudio>=2.8.0",
+        "torch==2.5.1",
+        "torchaudio==2.5.1",
         "numpy>=2.1.0",
         "fastapi[standard]",
         gpu="a10g",
@@ -53,8 +53,8 @@ chatterbox_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "libsndfile1")
     .pip_install(
-        "torch==2.6.0",
-        "torchaudio==2.6.0",
+        "torch==2.5.1",
+        "torchaudio==2.5.1",
         "numpy>=1.24.0,<1.26.0",
         "fastapi[standard]",
         "peft",
