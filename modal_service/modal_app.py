@@ -40,6 +40,7 @@ whisperx_image = (
     .pip_install(
         "whisperx @ git+https://github.com/m-bain/whisperx.git",
         "pyannote.audio>=3.1.0",
+        "huggingface_hub",
     )
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
@@ -116,7 +117,8 @@ class TranscribeService:
         hf_token = os.environ.get("HF_TOKEN", "")
         self.diarize_pipeline = None
         if hf_token:
-            self.diarize_pipeline = whisperx.DiarizationPipeline(
+            from whisperx.diarize import DiarizationPipeline
+            self.diarize_pipeline = DiarizationPipeline(
                 use_auth_token=hf_token, device=self.device
             )
             logger.info("✓ Diarization pipeline loaded")
