@@ -1,103 +1,139 @@
-import asyncio
-from typing import Dict, Any, List, Optional
-from .dialogue_generator_agent import DialogueGeneratorAgent
-from .tts_agent import TextToSpeechAgent
-from .speech_processing_agent import SpeechProcessingAgent
+"""
+Agent Coordinator (Revamped)
+
+Orchestrates the MCP agents:
+- SpeechProcessingAgent (WhisperX transcription + Chatterbox modification)
+- ChatterboxAgent (voice cloning + TTS)
+- DialogueGeneratorAgent (GPT dialogue for artificial speakers)
+
+Removed:
+- VoiceCloningAgent (replaced by ChatterboxAgent)
+- TextToSpeechAgent (replaced by ChatterboxAgent)
+"""
+
+import os
 import logging
+from typing import Dict, Any
+from .speech_processing_agent import SpeechProcessingAgent
+from .chatterbox_agent import ChatterboxAgent
+from .dialogue_generator_agent import DialogueGeneratorAgent
 
 logger = logging.getLogger(__name__)
 
-class AgentCoordinator:
-    def __init__(self, openai_api_key: str, assembly_ai_key: str):
-        self.dialogue_agent = DialogueGeneratorAgent(openai_api_key)
-        self.tts_agent = TextToSpeechAgent(openai_api_key)
-        self.speech_agent = SpeechProcessingAgent(assembly_ai_key)
 
-        self.agents = {
-            "dialogue_generator": self.dialogue_agent,
-            "text_to_speech": self.tts_agent,
-            "speech_processing": self.speech_agent
-        }
-    
+class AgentCoordinator:
+    """
+    Coordinates the MCP agent system.
+
+    Primary workflows:
+    1. Transcribe: Upload → WhisperX → speaker-diarized transcript
+    2. Modify: Edited transcript → Chatterbox voice cloning → final audio
+    3. Artificial Speaker: Prompt → GPT dialogue → Chatterbox TTS
+    """
+
+    def __init__(self):
+        self.dialogue_agent = DialogueGeneratorAgent()
+        self.chatterbox_agent = ChatterboxAgent()
+        self.speech_agent = SpeechProcessingAgent()
+
+        logger.info("AgentCoordinator initialized with Chatterbox + WhisperX")
+
     async def process_artificial_speaker_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Main workflow for adding an artificial speaker:
-        1. Generate dialogue based on context and speaker prompt
-        2. Convert text to speech with specified characteristics
+        Generate an artificial speaker's dialogue and voice.
+
+        Flow: User prompt → GPT generates dialogue → Chatterbox generates speech
+
+        Args:
+            request: {
+                "prompt": str,
+                "conversation_history": list,
+                "speaker_characteristics": str,
+                "exaggeration": float (0.0-1.0)
+            }
+
+        Returns:
+            response with conversation_entry + audio
         """
         try:
             # Step 1: Generate dialogue
             dialogue_request = {
                 "action": "generate_dialogue",
-                "conversation_history": request["conversation_history"],
-                "speaker_prompt": request["speaker_prompt"]
+                "prompt": request.get("prompt", ""),
+                "conversation_history": request.get("conversation_history", []),
+                "speaker_characteristics": request.get("speaker_characteristics", "")
             }
-            
+
             dialogue_response = await self.dialogue_agent.process_request(dialogue_request)
-            if not dialogue_response["success"]:
-                return dialogue_response
-            
-            generated_text = dialogue_response["data"]["generated_dialogue"]
-            
-            # Step 2: Convert to speech
+
+            if not dialogue_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Dialogue generation failed: {dialogue_response.get('error')}"
+                }
+
+            generated_text = dialogue_response["data"]["dialogue"]
+
+            # Step 2: Generate speech with Chatterbox
             tts_request = {
                 "action": "generate_speech",
                 "text": generated_text,
-                "speaker_characteristics": request["speaker_prompt"]
+                "speaker_characteristics": request.get("speaker_characteristics", ""),
+                "exaggeration": request.get("exaggeration", 0.5)
             }
-            
-            tts_response = await self.tts_agent.process_request(tts_request)
-            if not tts_response["success"]:
-                return tts_response
 
-            audio_base64 = tts_response["data"]["audio_base64"]
+            tts_response = await self.chatterbox_agent.process_request(tts_request)
 
-            # Create conversation entry
+            if not tts_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"TTS failed: {tts_response.get('error')}"
+                }
+
+            # Build conversation entry
             conversation_entry = {
-                "speaker": f"AI_{len(request['conversation_history']) + 1}",
+                "speaker": request.get("speaker_name", "AI"),
                 "original": {
                     "text": generated_text,
-                    "speaker_audio": audio_base64,
-                    "start": 0,  # Will be calculated based on position
-                    "end": 0     # Will be calculated based on audio length
+                    "speaker_audio": tts_response["data"]["audio_base64"]
                 },
                 "modified": {
-                    "text": generated_text
-                },
-                "artificial": True,
-                "speaker_characteristics": request["speaker_prompt"]
+                    "text": generated_text,
+                    "emotions": []
+                }
             }
 
             return {
                 "success": True,
                 "data": {
                     "conversation_entry": conversation_entry,
-                    "generated_text": generated_text,
-                    "audio_base64": audio_base64,
-                    "voice_used": tts_response["data"]["voice_used"]
+                    "dialogue": generated_text,
+                    "voice_used": tts_response["data"].get("voice_used", "chatterbox")
                 }
             }
-            
-        except Exception as e:
-            logger.error(f"Artificial speaker workflow error: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Failed to create artificial speaker: {str(e)}"
-            }
 
-    async def get_agent_capabilities(self) -> Dict[str, List[str]]:
-        """Return capabilities of all agents"""
+        except Exception as e:
+            logger.error(f"Artificial speaker request failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def get_agent_capabilities(self) -> Dict[str, list]:
+        """List capabilities of all agents"""
         return {
-            agent_id: agent.capabilities 
-            for agent_id, agent in self.agents.items()
+            "speech_processing": self.speech_agent.capabilities,
+            "chatterbox_tts": self.chatterbox_agent.capabilities,
+            "dialogue_generator": self.dialogue_agent.capabilities
         }
-    
+
     async def route_request(self, agent_id: str, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Route request to specific agent"""
-        if agent_id not in self.agents:
-            return {
-                "success": False,
-                "error": f"Unknown agent: {agent_id}"
-            }
-        
-        return await self.agents[agent_id].process_request(request)
+        """Route a request to the appropriate agent"""
+        agents = {
+            "speech_processing": self.speech_agent,
+            "chatterbox_tts": self.chatterbox_agent,
+            "dialogue_generator": self.dialogue_agent
+        }
+
+        agent = agents.get(agent_id)
+        if not agent:
+            return {"success": False, "error": f"Unknown agent: {agent_id}"}
+
+        return await agent.process_request(request)

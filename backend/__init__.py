@@ -4,6 +4,9 @@ from flask_cors import CORS
 
 def create_app():
     app = Flask(__name__)
+    app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB
+    app.config['MAX_FORM_MEMORY_SIZE'] = 500 * 1024 * 1024  # 500 MB for form fields
+    app.config['MAX_FORM_PARTS'] = 1000
 
     # CORS configuration - allow all origins to handle dyno wake-up issues
     CORS(app,

@@ -1,313 +1,292 @@
-# app/routes.py
+"""
+WaveCrafter Backend Routes (Revamped)
+
+API Endpoints:
+  POST /upload          - Upload audio file for transcription
+  GET  /status/<job_id> - Check transcription status (kept for compatibility)
+  POST /conversations_modified - Process modified transcripts → generate audio
+
+Removed:
+  - Speech/music classification (all uploads are speech now)
+  - AssemblyAI (replaced by WhisperX)
+  - VoiceCraft/Modal (replaced by Chatterbox)
+"""
+
 import os
 import json
 import hashlib
-from flask_socketio import SocketIO
-from flask import Blueprint, request, jsonify
+import asyncio
+import logging
+import threading
+import base64
+from io import BytesIO
+from flask import Blueprint, request, jsonify, current_app
 
-from backend.models.speech_music_classifier.sm_inference import sm_inference
-from backend.mcp_agents.agent_coordinator import AgentCoordinator
+logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
-socketio = SocketIO()
 
-# Get API keys from environment variables
-ASSEMBLY_AI_KEY = os.environ.get('ASSEMBLY_AI_KEY', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+# In-memory caches
+audio_cache = {}
+job_store = {}  # {job_id: {status, result, error, filepath}}
 
-# Initialize MCP Agent Coordinator
-agent_coordinator = AgentCoordinator(
-    openai_api_key=OPENAI_API_KEY,
-    assembly_ai_key=ASSEMBLY_AI_KEY
-)
+# Lock for thread-safe job_store access
+job_lock = threading.Lock()
 
-# Folder to store uploaded files
-UPLOAD_FOLDER = './uploads'
-SEPARATED_FOLDER = './separated'
-CACHE_FOLDER = './cache'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(SEPARATED_FOLDER, exist_ok=True)
-os.makedirs(CACHE_FOLDER, exist_ok=True)
 
-# Simple in-memory store for job tracking (use Redis in production)
-job_store = {}
+def get_speech_agent():
+    """Get speech processing agent from app context"""
+    from .mcp_agents.speech_processing_agent import SpeechProcessingAgent
+    if not hasattr(current_app, '_speech_agent'):
+        current_app._speech_agent = SpeechProcessingAgent()
+    return current_app._speech_agent
 
-def get_file_hash(filepath):
-    """Generate hash of file for caching"""
-    hash_md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
 
-def get_cached_result(file_hash):
-    """Check if result exists in cache"""
-    cache_path = os.path.join(CACHE_FOLDER, f"{file_hash}.json")
-    if os.path.exists(cache_path):
-        with open(cache_path, 'r') as f:
-            return json.load(f)
-    return None
+def file_hash(filepath: str) -> str:
+    """Calculate MD5 hash for cache key"""
+    h = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
-def save_to_cache(file_hash, result):
-    """Save result to cache"""
-    cache_path = os.path.join(CACHE_FOLDER, f"{file_hash}.json")
-    with open(cache_path, 'w') as f:
-        json.dump(result, f)
+
+def save_upload(file) -> str:
+    """Save uploaded file to temp directory, return path"""
+    upload_dir = os.path.join(os.path.dirname(__file__), 'uploads')
+    os.makedirs(upload_dir, exist_ok=True)
+
+    filepath = os.path.join(upload_dir, file.filename)
+    file.save(filepath)
+    return filepath
+
+
+# ──────────────────────────────────────────────────
+# Upload endpoint
+# ──────────────────────────────────────────────────
 
 @main.route('/upload', methods=['POST'])
 def upload_file():
+    """
+    Upload audio file for transcription.
+
+    WhisperX is fast enough to run synchronously for small files.
+    For larger files we still use async with polling.
+
+    Returns:
+        - If fast mode (< 30s audio): immediate transcription result
+        - If async mode: job_id for polling via /status/<job_id>
+    """
     if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
+        return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "No file selected"}), 400
 
-    if file:
-        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-        file.save(filepath)
+    try:
+        # Save upload
+        filepath = save_upload(file)
+        logger.info(f"Upload received: {file.filename}")
 
-        # Check cache first
-        file_hash = get_file_hash(filepath)
-        cached_result = get_cached_result(file_hash)
-
-        if cached_result:
+        # Check cache
+        fhash = file_hash(filepath)
+        if fhash in audio_cache:
+            logger.info(f"Cache hit: {fhash}")
+            cached = audio_cache[fhash]
             return jsonify({
-                "message": "File processed (from cache)",
-                "cached": True,
-                **cached_result
+                "status": "completed",
+                "conversations": cached["conversations"],
+                "full_audio": cached["full_audio"],
+                "cached": True
             }), 200
 
-        # Predict whether the uploaded file is "speech" or "music"
-        prediction = sm_inference(filepath)
+        # Start async transcription in background thread
+        import uuid
+        job_id = str(uuid.uuid4())
 
-        if prediction == "Speech":
-            # Submit async transcription using MCP agent
-            print(f"[DEBUG] Submitting async transcription for: {filepath}")
-            transcript_id = agent_coordinator.speech_agent.submit_transcription_async(filepath)
-            print(f"[DEBUG] Got transcript_id: {transcript_id}")
-
-            # Store job info
-            job_id = f"{file_hash}_{transcript_id}"
+        with job_lock:
             job_store[job_id] = {
-                'filepath': filepath,
-                'transcript_id': transcript_id,
-                'file_hash': file_hash,
-                'status': 'processing'
+                "status": "processing",
+                "result": None,
+                "error": None,
+                "filepath": filepath,
+                "fhash": fhash
             }
 
-            print(f"[DEBUG] Created job with id: {job_id}")
-            print(f"[DEBUG] Job store now contains: {list(job_store.keys())}")
+        # Run transcription in background thread
+        # Pass the actual Flask app so the thread can use its context
+        app = current_app._get_current_object()
+        thread = threading.Thread(
+            target=_run_transcription,
+            args=(app, job_id, filepath, fhash),
+            daemon=True
+        )
+        thread.start()
 
-            return jsonify({
-                "message": "File uploaded. Processing started.",
-                "job_id": job_id,
-                "prediction": prediction,
-                "status": "processing"
-            }), 202  # 202 = Accepted, processing
-        else:
-            return jsonify({
-                "message": "Music separation not yet implemented",
-                "prediction": prediction
-            }), 501  # 501 = Not Implemented
+        return jsonify({
+            "status": "processing",
+            "job_id": job_id,
+            "message": "Transcription started"
+        }), 202
+
+    except Exception as e:
+        logger.error(f"Upload failed: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_transcription(app, job_id: str, filepath: str, fhash: str):
+    """Background transcription task"""
+    try:
+        with app.app_context():
+            speech_agent = get_speech_agent()
+            result = speech_agent.transcribe_audio(filepath)
+
+            with job_lock:
+                if result["status"] == "completed":
+                    job_store[job_id]["status"] = "completed"
+                    job_store[job_id]["result"] = result
+
+                    # Cache the result
+                    audio_cache[fhash] = {
+                        "conversations": result["conversations"],
+                        "full_audio": result["full_audio"]
+                    }
+                else:
+                    job_store[job_id]["status"] = "error"
+                    job_store[job_id]["error"] = result.get("error", "Unknown error")
+
+    except Exception as e:
+        logger.error(f"Background transcription failed: {e}", exc_info=True)
+        with job_lock:
+            job_store[job_id]["status"] = "error"
+            job_store[job_id]["error"] = str(e)
+
+
+# ──────────────────────────────────────────────────
+# Status polling endpoint
+# ──────────────────────────────────────────────────
 
 @main.route('/status/<job_id>', methods=['GET'])
 def check_status(job_id):
-    """Poll endpoint for checking transcription status"""
-    try:
-        print(f"[DEBUG] Checking status for job_id: {job_id}")
-        print(f"[DEBUG] Current job_store keys: {list(job_store.keys())}")
+    """Check transcription job status"""
+    with job_lock:
+        job = job_store.get(job_id)
 
-        if job_id not in job_store:
-            print(f"[ERROR] Job {job_id} not found in job_store")
-            return jsonify({"error": "Job not found"}), 404
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
 
-        job_info = job_store[job_id]
-        filepath = job_info['filepath']
-        transcript_id = job_info['transcript_id']
-        file_hash = job_info['file_hash']
+    if job["status"] == "completed" and job["result"]:
+        return jsonify({
+            "status": "completed",
+            "conversations": job["result"]["conversations"],
+            "full_audio": job["result"]["full_audio"]
+        }), 200
 
-        print(f"[DEBUG] filepath: {filepath}, transcript_id: {transcript_id}")
-
-        # Get transcription status using MCP agent
-        result = agent_coordinator.speech_agent.get_transcription_status(filepath, transcript_id)
-
-        print(f"[DEBUG] Result from get_transcript_status: {result}")
-
-        if result['status'] == 'completed':
-            # Cache the result
-            cache_data = {
-                'prediction': 'Speech',
-                'full_audio': result['full_audio'],
-                'conversations': result['conversations']
-            }
-            save_to_cache(file_hash, cache_data)
-
-            # Update job store
-            job_store[job_id]['status'] = 'completed'
-
-            return jsonify({
-                "status": "completed",
-                "prediction": "Speech",
-                "full_audio": result['full_audio'],
-                "conversations": result['conversations']
-            }), 200
-
-        elif result['status'] == 'error':
-            job_store[job_id]['status'] = 'error'
-            return jsonify({
-                "status": "error",
-                "error": result.get('error', 'Unknown error')
-            }), 500
-
-        else:
-            # Still processing
-            return jsonify({
-                "status": result['status'],  # 'queued' or 'processing'
-                "message": f"Transcription {result['status']}..."
-            }), 202
-
-    except Exception as e:
-        print(f"Error in check_status: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    elif job["status"] == "error":
         return jsonify({
             "status": "error",
-            "error": f"Server error: {str(e)}"
+            "error": job.get("error", "Unknown error")
         }), 500
+
+    else:
+        return jsonify({
+            "status": "processing",
+            "message": "Transcription in progress..."
+        }), 200
+
+
+# ──────────────────────────────────────────────────
+# Modified transcript → audio generation
+# ──────────────────────────────────────────────────
 
 @main.route('/conversations_modified', methods=['POST'])
 def modified_transcript():
-    """Generate final audio from modified conversations"""
+    """
+    Process modified transcripts and generate final audio.
+
+    Expects multipart form data or JSON with:
+    - conversations_updated: JSON list of modified conversations
+    - full_audio: base64 of original audio (optional)
+    - Each conversation can have emotion tags
+    """
     try:
-        # Get the conversations JSON from the request
-        conversation_mod = request.files.get('conversationsUpdated')
-        full_audio_file = request.files.get('full_audio')
-
-        if not conversation_mod:
-            return jsonify({"error": "No conversations data provided"}), 400
-
-        # Parse the conversations JSON
-        import json
-        import asyncio
-        final_structure_data = conversation_mod.read().decode('utf-8')
-        conversations_list = json.loads(final_structure_data)
-
-        print(f"[DEBUG] Received {len(conversations_list)} conversations for processing")
-
-        # DEBUG: Print each conversation's text to verify modifications
-        for idx, conv_data in enumerate(conversations_list):
-            conv_key = list(conv_data.keys())[0]
-            conv = conv_data[conv_key]
-            original = conv.get('original', {}).get('text', 'N/A')
-            modified = conv.get('modified', {}).get('text', 'N/A')
-            print(f"[DEBUG] Conv {idx} ({conv_key}):")
-            print(f"  Original: '{original}'")
-            print(f"  Modified: '{modified}'")
-            print(f"  Text changed: {original != modified}")
-
-        # Import the speech processing agent
-        from backend.mcp_agents.speech_processing_agent import SpeechProcessingAgent
-
-        # Initialize the agent (using env var from top of file)
-        speech_agent = SpeechProcessingAgent(ASSEMBLY_AI_KEY)
-
-        # Prepare request for final audio generation
-        request_data = {
-            "action": "generate_final_audio",
-            "conversations": conversations_list
-        }
-
-        # Generate final audio (run async function in sync context)
-        print("[DEBUG] Generating final audio...")
-        result = asyncio.run(speech_agent.process_request(request_data))
-
-        if not result["success"]:
-            print(f"[ERROR] Failed to generate final audio: {result.get('error')}")
-            return jsonify({
-                "error": result.get('error', 'Failed to generate final audio')
-            }), 500
-
-        print("[DEBUG] Final audio generated successfully")
-
-        # Optional: Upload to S3 and return presigned URL
-        final_audio_base64 = result["data"]["final_audio_base64"]
-        s3_url = None
-
-        try:
-            from backend.utils.s3_storage import S3AudioStorage
-            import base64
-
-            s3_storage = S3AudioStorage()
-
-            if s3_storage.is_enabled():
-                print("[DEBUG] Uploading final audio to S3...")
-
-                # Decode base64 audio to bytes
-                audio_bytes = base64.b64decode(final_audio_base64)
-
-                # Upload and get presigned URL (valid for 1 hour)
-                s3_url = s3_storage.upload_and_get_url(
-                    audio_data=audio_bytes,
-                    filename=None,  # Auto-generate filename
-                    expiration=3600  # 1 hour
-                )
-
-                if s3_url:
-                    print(f"[DEBUG] ✓ Audio uploaded to S3: {s3_url[:50]}...")
-                else:
-                    print("[WARNING] S3 upload failed, using base64 fallback")
-
-        except Exception as e:
-            print(f"[WARNING] S3 upload error: {e}, using base64 fallback")
-
-        # Return the final audio data
-        response_data = {
-            "message": "Final audio generated successfully!",
-            "modified_audio": final_audio_base64,  # Base64 for backward compatibility
-            "duration_seconds": result["data"]["duration_seconds"],
-            "sample_rate": result["data"]["sample_rate"],
-            "segments_processed": result["data"]["segments_processed"],
-            "segments_cloned": result["data"].get("segments_cloned", 0),
-            "processing_time_seconds": result["data"].get("processing_time_seconds", 0)
-        }
-
-        # Add S3 URL if available
-        if s3_url:
-            response_data["audio_url"] = s3_url
-            response_data["storage_method"] = "s3"
+        # Parse request data (handle both multipart and JSON)
+        if request.content_type and 'multipart' in request.content_type:
+            conversations_str = request.form.get('conversations_updated', '[]')
+            full_audio = request.form.get('full_audio', '')
         else:
-            response_data["storage_method"] = "base64"
+            data = request.get_json()
+            conversations_str = json.dumps(data.get('conversations_updated', []))
+            full_audio = data.get('full_audio', '')
+
+        conversations = json.loads(conversations_str) if isinstance(conversations_str, str) else conversations_str
+
+        if not conversations:
+            return jsonify({"error": "No conversations provided"}), 400
+
+        logger.info(f"Processing {len(conversations)} modified conversations")
+
+        # Use speech agent to process modifications
+        speech_agent = get_speech_agent()
+
+        request_data = {
+            "action": "process_modifications",
+            "conversations": conversations,
+            "full_audio": full_audio
+        }
+
+        # Run async processing
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(speech_agent.process_request(request_data))
+        finally:
+            loop.close()
+
+        if not result.get("success"):
+            error_msg = result.get("error", "Processing failed")
+            logger.error(f"Modification processing failed: {error_msg}")
+            return jsonify({"error": error_msg}), 500
+
+        result_data = result.get("data", {})
+
+        # Build response
+        response_data = {
+            "modified_audio": result_data.get("modified_audio", ""),
+            "segments_processed": result_data.get("segments_processed", 0),
+            "segments_changed": result_data.get("segments_changed", 0),
+            "stats": result_data.get("stats", {})
+        }
+
+        # Try S3 upload if enabled
+        if os.environ.get("S3_ENABLED", "false").lower() == "true":
+            try:
+                from .utils.s3_storage import upload_audio_to_s3
+                audio_bytes = base64.b64decode(response_data["modified_audio"])
+                s3_result = upload_audio_to_s3(audio_bytes)
+                if s3_result.get("success"):
+                    response_data["audio_url"] = s3_result["url"]
+                    logger.info(f"Uploaded to S3: {s3_result['url']}")
+            except Exception as s3_err:
+                logger.warning(f"S3 upload failed (using base64 fallback): {s3_err}")
 
         return jsonify(response_data), 200
 
     except Exception as e:
-        print(f"[ERROR] Error in modified_transcript: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            "error": f"Failed to generate final audio: {str(e)}"
-        }), 500
-        
+        logger.error(f"Modified transcript endpoint failed: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
-# def separate_audio(filepath):
-#     """ This function separates the uploaded file into its components using Demucs. """
-#     # Get model
-#     model = get_model('htdemucs')  # Load Demucs model (htdemucs is a good general choice)
 
-#     output_folder = Path(SEPARATED_FOLDER) / Path(filepath).stem
-#     os.makedirs(output_folder, exist_ok=True)
+# ──────────────────────────────────────────────────
+# Health check
+# ──────────────────────────────────────────────────
 
-#     # Use subprocess to safely call Demucs
-#     command = f"demucs {filepath} -o {output_folder}"
-#     subprocess.run(command.split(), check=True)
-
-#     # Check for separated files
-#     result_folder = output_folder / Path(filepath).stem
-#     if not result_folder.exists():
-#         return {"error": "Separation failed"}
-
-#     # Collect all result files
-#     result_files = [str(result_folder / f) for f in os.listdir(result_folder) if os.path.isfile(result_folder / f)]
-
-#     return {"separated_files": result_files}
+@main.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "ok",
+        "service": "wavecraft-api",
+        "engine": "whisperx+chatterbox"
+    }), 200
