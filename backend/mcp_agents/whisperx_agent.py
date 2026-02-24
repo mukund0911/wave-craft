@@ -70,14 +70,19 @@ class WhisperXAgent(MCPAgent):
         self.model_size = model_size
         self.compute_type = compute_type
 
-        torch = _get_torch()
-        if device:
-            self.device = device
-        elif torch.cuda.is_available():
-            self.device = "cuda"
+        # Avoid loading torch locally if using Modal GPU service
+        if MODAL_TRANSCRIBE_URL:
+            self.device = "remote"
+            self.compute_type = "remote"
         else:
-            self.device = "cpu"
-            self.compute_type = "int8"  # CPU needs int8
+            torch = _get_torch()
+            if device:
+                self.device = device
+            elif torch.cuda.is_available():
+                self.device = "cuda"
+            else:
+                self.device = "cpu"
+                self.compute_type = "int8"  # CPU needs int8
 
         self._model = None
         self._align_model = None

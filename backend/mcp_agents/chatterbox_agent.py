@@ -72,13 +72,17 @@ class ChatterboxAgent(MCPAgent):
             "clone_voice", "generate_speech", "modify_speech"
         ])
 
-        torch = _get_torch()
-        if device:
-            self.device = device
-        elif torch.cuda.is_available():
-            self.device = "cuda"
+        # Avoid loading torch locally if using Modal GPU service
+        if MODAL_TTS_URL:
+            self.device = "remote"
         else:
-            self.device = "cpu"
+            torch = _get_torch()
+            if device:
+                self.device = device
+            elif torch.cuda.is_available():
+                self.device = "cuda"
+            else:
+                self.device = "cpu"
 
         self._model = None
         self._stats = {
