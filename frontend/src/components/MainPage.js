@@ -199,27 +199,22 @@ class MainPage extends Component {
 
     buildModifiedText(originalText, mods) {
         const words = originalText.split(/\s+/);
+        const insertedWords = mods.insertedWords || [];
         const result = [];
 
-        for (let i = 0; i < words.length; i++) {
-            // Check for inserted words before this position
-            const insertsBefore = (mods.insertedWords || [])
-                .filter(ins => ins.afterIndex === i - 1);
-            for (const ins of insertsBefore) {
-                result.push(ins.text);
-            }
+        // Insertions at the beginning (afterIndex === -1)
+        for (const ins of insertedWords.filter(ins => ins.afterIndex === -1)) {
+            result.push(ins.text);
+        }
 
+        for (let i = 0; i < words.length; i++) {
             // Add word if not deleted
             if (!mods.deletedWords.has(i)) {
                 result.push(words[i]);
             }
-        }
 
-        // Insertions at the end
-        const insertsEnd = (mods.insertedWords || [])
-            .filter(ins => ins.afterIndex >= words.length - 1 || ins.afterIndex === -1);
-        for (const ins of insertsEnd) {
-            if (!result.includes(ins.text)) {
+            // Insertions after this word
+            for (const ins of insertedWords.filter(ins => ins.afterIndex === i)) {
                 result.push(ins.text);
             }
         }
@@ -413,19 +408,20 @@ class MainPage extends Component {
         }
 
         for (let i = 0; i < words.length; i++) {
-            // Inserted words before this position
+            // Inserted words before this position (afterIndex === i - 1)
             const insertsBefore = (mods.insertedWords || [])
                 .filter(ins => ins.afterIndex === i - 1);
-            for (const ins of insertsBefore) {
+            for (let j = 0; j < insertsBefore.length; j++) {
+                const ins = insertsBefore[j];
                 if (ins.isParalinguistic) {
                     elements.push(
-                        <span key={`para-${i}-${ins.text}`} className="paralinguistic-tag">
+                        <span key={`para-${i}-${j}`} className="paralinguistic-tag">
                             {ins.text}
                         </span>
                     );
                 } else {
                     elements.push(
-                        <span key={`ins-${i}-${ins.text}`} className="word inserted">
+                        <span key={`ins-${i}-${j}`} className="word inserted">
                             {ins.text}{' '}
                         </span>
                     );
@@ -486,6 +482,28 @@ class MainPage extends Component {
                     />
                 );
                 elements.push(<span key={`sp-ins-${i}`}> </span>);
+            }
+
+            // Inserted words after the last word
+            if (i === words.length - 1) {
+                const insertsAfterLast = (mods.insertedWords || [])
+                    .filter(ins => ins.afterIndex >= i);
+                for (let j = 0; j < insertsAfterLast.length; j++) {
+                    const ins = insertsAfterLast[j];
+                    if (ins.isParalinguistic) {
+                        elements.push(
+                            <span key={`para-end-${j}`} className="paralinguistic-tag">
+                                {ins.text}
+                            </span>
+                        );
+                    } else {
+                        elements.push(
+                            <span key={`ins-end-${j}`} className="word inserted">
+                                {ins.text}{' '}
+                            </span>
+                        );
+                    }
+                }
             }
         }
 
