@@ -130,6 +130,7 @@ class WhisperXAgent(MCPAgent):
         logger.info("Loading diarization pipeline...")
         from whisperx.diarize import DiarizationPipeline
         self._diarize_pipeline = DiarizationPipeline(
+            model_name="pyannote/speaker-diarization-3.1",
             token=self.hf_token,
             device=self.device
         )

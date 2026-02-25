@@ -114,6 +114,7 @@ class TranscribeService:
         if hf_token:
             from whisperx.diarize import DiarizationPipeline
             self.diarize_pipeline = DiarizationPipeline(
+                model_name="pyannote/speaker-diarization-3.1",
                 token=hf_token, device=self.device
             )
             logger.info("✓ Diarization pipeline loaded")
