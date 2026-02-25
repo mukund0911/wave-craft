@@ -6,13 +6,14 @@ Replaces the old AssemblyAI + VoiceCraft pipeline entirely.
 """
 
 import os
+import wave
+import struct
 import base64
 import logging
 import asyncio
 import tempfile
 from io import BytesIO
 from typing import Dict, Any, List, Optional
-from pydub import AudioSegment
 from .base_agent import MCPAgent
 from .whisperx_agent import WhisperXAgent
 from .chatterbox_agent import ChatterboxAgent
@@ -241,11 +242,12 @@ class SpeechProcessingAgent(MCPAgent):
     def _assemble_audio(self, segments: List[Dict[str, Any]],
                          crossfade_ms: int = 50) -> str:
         """
-        Assemble processed segments into final audio with crossfades.
+        Assemble processed segments into final WAV audio.
+        Uses Python stdlib `wave` module — no ffmpeg/ffprobe needed.
 
         Args:
-            segments: List of dicts with audio_base64
-            crossfade_ms: Crossfade duration between segments
+            segments: List of dicts with audio_base64 (WAV format)
+            crossfade_ms: Crossfade duration (unused, kept for API compat)
 
         Returns:
             Base64 string of assembled WAV audio
@@ -253,7 +255,9 @@ class SpeechProcessingAgent(MCPAgent):
         if not segments:
             return ""
 
-        combined = AudioSegment.empty()
+        # Read all WAV segments
+        pcm_chunks = []
+        output_params = None  # (nchannels, sampwidth, framerate)
 
         for i, segment in enumerate(segments):
             audio_b64 = segment.get("audio_base64", "")
@@ -262,24 +266,65 @@ class SpeechProcessingAgent(MCPAgent):
 
             try:
                 audio_bytes = base64.b64decode(audio_b64)
-                seg_audio = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
+                with wave.open(BytesIO(audio_bytes), 'rb') as wf:
+                    params = (wf.getnchannels(), wf.getsampwidth(), wf.getframerate())
+                    frames = wf.readframes(wf.getnframes())
 
-                if len(combined) > 0 and len(seg_audio) > crossfade_ms:
-                    combined = combined.append(seg_audio, crossfade=crossfade_ms)
-                else:
-                    combined += seg_audio
+                    if output_params is None:
+                        output_params = params
+
+                    # Resample if params differ from first segment
+                    if params != output_params:
+                        frames = self._convert_wav_frames(
+                            frames, params, output_params
+                        )
+
+                    pcm_chunks.append(frames)
 
             except Exception as e:
                 logger.warning(f"Failed to process segment {i}: {e}")
                 continue
 
-        if len(combined) == 0:
+        if not pcm_chunks or output_params is None:
             return ""
 
-        # Export as WAV
+        # Write combined PCM to WAV
         buffer = BytesIO()
-        combined.export(buffer, format="wav")
+        with wave.open(buffer, 'wb') as out:
+            out.setnchannels(output_params[0])
+            out.setsampwidth(output_params[1])
+            out.setframerate(output_params[2])
+            for chunk in pcm_chunks:
+                out.writeframes(chunk)
+
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+    @staticmethod
+    def _convert_wav_frames(frames: bytes, src_params: tuple, dst_params: tuple) -> bytes:
+        """Convert WAV frames to match destination params (channels, sampwidth, framerate)."""
+        src_ch, src_sw, src_fr = src_params
+        dst_ch, dst_sw, dst_fr = dst_params
+
+        # Convert sample width if needed
+        if src_sw != dst_sw:
+            import audioop
+            frames = audioop.lin2lin(frames, src_sw, dst_sw)
+            src_sw = dst_sw
+
+        # Convert channels if needed
+        if src_ch != dst_ch:
+            import audioop
+            if src_ch == 1 and dst_ch == 2:
+                frames = audioop.tostereo(frames, dst_sw, 1, 1)
+            elif src_ch == 2 and dst_ch == 1:
+                frames = audioop.tomono(frames, dst_sw, 0.5, 0.5)
+
+        # Convert framerate if needed
+        if src_fr != dst_fr:
+            import audioop
+            frames, _ = audioop.ratecv(frames, dst_sw, dst_ch, src_fr, dst_fr, None)
+
+        return frames
 
     # ──────────────────────────────────────────────────
     # Audio Optimization
@@ -287,31 +332,37 @@ class SpeechProcessingAgent(MCPAgent):
 
     def _optimize_audio(self, audio_path: str) -> str:
         """
-        Optimize audio for transcription:
-        - Convert to WAV
-        - Mono channel
-        - 16kHz sample rate (WhisperX default)
+        Optimize audio for local transcription:
+        - Convert to mono, 16kHz WAV (WhisperX default)
+        Uses stdlib wave + audioop — no ffmpeg needed.
 
         Returns path to optimized file (may be same as input for WAVs).
         """
         try:
-            audio = AudioSegment.from_file(audio_path)
-
-            # Check if optimization needed
-            needs_optimization = (
-                audio.channels > 1 or
-                audio.frame_rate != 16000 or
-                not audio_path.lower().endswith('.wav')
-            )
-
-            if not needs_optimization:
+            if not audio_path.lower().endswith('.wav'):
                 return audio_path
 
-            # Optimize
-            audio = audio.set_channels(1).set_frame_rate(16000)
+            with wave.open(audio_path, 'rb') as wf:
+                channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                framerate = wf.getframerate()
+                frames = wf.readframes(wf.getnframes())
+
+            if channels == 1 and framerate == 16000:
+                return audio_path
+
+            import audioop
+            if channels == 2:
+                frames = audioop.tomono(frames, sampwidth, 0.5, 0.5)
+            if framerate != 16000:
+                frames, _ = audioop.ratecv(frames, sampwidth, 1, framerate, 16000, None)
 
             optimized_path = tempfile.mktemp(suffix=".wav", prefix="optimized_")
-            audio.export(optimized_path, format="wav")
+            with wave.open(optimized_path, 'wb') as out:
+                out.setnchannels(1)
+                out.setsampwidth(sampwidth)
+                out.setframerate(16000)
+                out.writeframes(frames)
 
             logger.info(f"Audio optimized: {audio_path} → {optimized_path}")
             return optimized_path
