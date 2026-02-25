@@ -245,18 +245,16 @@ class MainPage extends Component {
     // ──────────────────────────────────────────────────
 
     playSegmentAudio = (convKey, audioB64) => {
+        const audio = this.audioRef.current;
+        if (!audio) return;
+
         if (this.state.currentlyPlaying === convKey) {
-            // Stop
-            if (this.audioRef.current) {
-                this.audioRef.current.pause();
-                this.audioRef.current.currentTime = 0;
-            }
+            audio.pause();
+            audio.currentTime = 0;
             this.setState({ currentlyPlaying: null });
             return;
         }
 
-        const audio = this.audioRef.current || new Audio();
-        this.audioRef.current = audio;
         audio.src = `data:audio/wav;base64,${audioB64}`;
         audio.onended = () => this.setState({ currentlyPlaying: null });
         audio.play();
@@ -342,10 +340,9 @@ class MainPage extends Component {
 
     handlePlayGenerated = () => {
         const { generatedAudio } = this.state;
-        if (!generatedAudio) return;
+        if (!generatedAudio || !this.audioRef.current) return;
 
-        const audio = this.audioRef.current || new Audio();
-        this.audioRef.current = audio;
+        const audio = this.audioRef.current;
         audio.src = `data:audio/wav;base64,${generatedAudio}`;
         audio.play();
     };

@@ -127,9 +127,9 @@ class WhisperXAgent(MCPAgent):
             logger.warning("No HF_TOKEN set — diarization disabled. Set HF_TOKEN env var.")
             return
 
-        whisperx = _get_whisperx()
         logger.info("Loading diarization pipeline...")
-        self._diarize_pipeline = whisperx.DiarizationPipeline(
+        from whisperx.diarize import DiarizationPipeline
+        self._diarize_pipeline = DiarizationPipeline(
             use_auth_token=self.hf_token,
             device=self.device
         )

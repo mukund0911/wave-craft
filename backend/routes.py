@@ -53,10 +53,12 @@ def file_hash(filepath: str) -> str:
 
 def save_upload(file) -> str:
     """Save uploaded file to temp directory, return path"""
+    from werkzeug.utils import secure_filename
     upload_dir = os.path.join(os.path.dirname(__file__), 'uploads')
     os.makedirs(upload_dir, exist_ok=True)
 
-    filepath = os.path.join(upload_dir, file.filename)
+    safe_name = secure_filename(file.filename) or 'upload.wav'
+    filepath = os.path.join(upload_dir, safe_name)
     file.save(filepath)
     return filepath
 
@@ -172,21 +174,24 @@ def check_status(job_id):
     """Check transcription job status"""
     with job_lock:
         job = job_store.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        # Copy status and relevant data while holding the lock
+        status = job["status"]
+        result = job.get("result")
+        error = job.get("error")
 
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-
-    if job["status"] == "completed" and job["result"]:
+    if status == "completed" and result:
         return jsonify({
             "status": "completed",
-            "conversations": job["result"]["conversations"],
-            "full_audio": job["result"]["full_audio"]
+            "conversations": result["conversations"],
+            "full_audio": result["full_audio"]
         }), 200
 
-    elif job["status"] == "error":
+    elif status == "error":
         return jsonify({
             "status": "error",
-            "error": job.get("error", "Unknown error")
+            "error": error or "Unknown error"
         }), 500
 
     else:
@@ -262,12 +267,13 @@ def modified_transcript():
         # Try S3 upload if enabled
         if os.environ.get("S3_ENABLED", "false").lower() == "true":
             try:
-                from .utils.s3_storage import upload_audio_to_s3
+                from .utils.s3_storage import S3AudioStorage
+                storage = S3AudioStorage()
                 audio_bytes = base64.b64decode(response_data["modified_audio"])
-                s3_result = upload_audio_to_s3(audio_bytes)
-                if s3_result.get("success"):
-                    response_data["audio_url"] = s3_result["url"]
-                    logger.info(f"Uploaded to S3: {s3_result['url']}")
+                url = storage.upload_and_get_url(audio_bytes)
+                if url:
+                    response_data["audio_url"] = url
+                    logger.info(f"Uploaded to S3: {url}")
             except Exception as s3_err:
                 logger.warning(f"S3 upload failed (using base64 fallback): {s3_err}")
 
