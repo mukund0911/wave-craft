@@ -353,7 +353,7 @@ class ChatterboxAgent(MCPAgent):
     def _save_temp_audio(self, audio_b64: str) -> str:
         """Save base64 audio to temp WAV file, return path"""
         audio_bytes = base64.b64decode(audio_b64)
-        audio_seg = AudioSegment.from_file(BytesIO(audio_bytes))
+        audio_seg = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
 
         # Ensure WAV format, mono, 22050 Hz
         audio_seg = audio_seg.set_channels(1).set_frame_rate(22050)

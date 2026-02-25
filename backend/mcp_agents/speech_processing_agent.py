@@ -84,8 +84,11 @@ class SpeechProcessingAgent(MCPAgent):
         """
         logger.info(f"Starting transcription: {audio_path}")
 
-        # Optimize audio first
-        optimized_path = self._optimize_audio(audio_path)
+        # Only optimize audio locally — Modal handles its own format conversion
+        if self.whisperx_agent.device == "remote":
+            optimized_path = audio_path
+        else:
+            optimized_path = self._optimize_audio(audio_path)
 
         try:
             # Run WhisperX
@@ -259,7 +262,7 @@ class SpeechProcessingAgent(MCPAgent):
 
             try:
                 audio_bytes = base64.b64decode(audio_b64)
-                seg_audio = AudioSegment.from_file(BytesIO(audio_bytes))
+                seg_audio = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
 
                 if len(combined) > 0 and len(seg_audio) > crossfade_ms:
                     combined = combined.append(seg_audio, crossfade=crossfade_ms)
