@@ -99,7 +99,6 @@ class MainPage extends Component {
     handleWordRightClick = (e, convKey, wordIndex) => {
         e.preventDefault();
         const rect = e.target.getBoundingClientRect();
-        const mods = this.getMods(convKey);
 
         this.setState({
             showEmotionPicker: true,
@@ -354,7 +353,7 @@ class MainPage extends Component {
     getEditStats() {
         let modified = 0, deleted = 0, inserted = 0, emotions = 0;
 
-        for (const [key, mods] of Object.entries(this.state.modifications)) {
+        for (const [, mods] of Object.entries(this.state.modifications)) {
             deleted += (mods.deletedWords?.size || 0);
             inserted += (mods.insertedWords?.length || 0);
             emotions += Object.keys(mods.emotions || {}).length;
@@ -494,7 +493,6 @@ class MainPage extends Component {
         } = this.state;
 
         const stats = this.getEditStats();
-        const hasChanges = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0;
 
         return (
             <div className="main-page">
