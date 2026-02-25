@@ -64,7 +64,6 @@ class UploadButtonClass extends Component {
         try {
             const response = await axios.post(`${apiUrl}/upload`, formData, {
                 headers: { 'content-type': 'multipart/form-data' },
-                withCredentials: true,
                 onUploadProgress: (progressEvent) => {
                     const pct = Math.round((progressEvent.loaded * 40) / progressEvent.total) + 10;
                     this.setState({ progress: pct, statusText: 'Uploading audio...' });
@@ -113,9 +112,7 @@ class UploadButtonClass extends Component {
             }
 
             try {
-                const response = await axios.get(`${apiUrl}/status/${jobId}`, {
-                    withCredentials: true,
-                });
+                const response = await axios.get(`${apiUrl}/status/${jobId}`);
 
                 if (response.data.status === 'completed') {
                     this.setState({ progress: 100, statusText: 'Complete!' });

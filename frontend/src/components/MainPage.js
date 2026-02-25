@@ -291,14 +291,25 @@ class MainPage extends Component {
             formData.append('conversations_updated', JSON.stringify(conversationsUpdated));
             formData.append('full_audio', this.state.fullAudio);
 
-            const response = await axios.post(
-                `${apiUrl}/conversations_modified`,
-                formData,
-                {
-                    headers: { 'content-type': 'multipart/form-data' },
-                    withCredentials: true,
+            // Retry on 503 (Heroku dyno waking up)
+            let response;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    response = await axios.post(
+                        `${apiUrl}/conversations_modified`,
+                        formData,
+                        { headers: { 'content-type': 'multipart/form-data' } }
+                    );
+                    break;
+                } catch (retryErr) {
+                    const status = retryErr.response?.status;
+                    if ((status === 503 || !retryErr.response) && attempt < 2) {
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue;
+                    }
+                    throw retryErr;
                 }
-            );
+            }
 
             this.setState({
                 isGenerating: false,

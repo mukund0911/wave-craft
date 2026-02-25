@@ -1,5 +1,5 @@
 # app/__init__.py
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 
 ALLOWED_ORIGINS = [
@@ -9,14 +9,6 @@ ALLOWED_ORIGINS = [
     'http://127.0.0.1:3000',
     'http://localhost:5000',
 ]
-
-
-def _get_cors_origin():
-    """Return the request origin if it's in the allowed list, else the first allowed origin."""
-    origin = request.headers.get('Origin', '')
-    if origin in ALLOWED_ORIGINS:
-        return origin
-    return ALLOWED_ORIGINS[0]
 
 
 def create_app():
@@ -30,18 +22,16 @@ def create_app():
          origins=ALLOWED_ORIGINS,
          methods=['GET', 'POST', 'OPTIONS'],
          allow_headers=['Content-Type'],
-         supports_credentials=True,
          expose_headers=['Content-Type'])
 
-    # Error handlers with CORS headers (must match origin, not wildcard, when credentials are used)
+    # Error handlers with CORS headers
     @app.errorhandler(503)
     def service_unavailable(e):
         response = jsonify({
             'error': 'Service temporarily unavailable. The server is waking up, please try again in a moment.'
         })
         response.status_code = 503
-        response.headers['Access-Control-Allow-Origin'] = _get_cors_origin()
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
@@ -52,8 +42,7 @@ def create_app():
             'error': 'Internal server error'
         })
         response.status_code = 500
-        response.headers['Access-Control-Allow-Origin'] = _get_cors_origin()
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
