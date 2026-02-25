@@ -26,27 +26,17 @@ MODEL_CACHE_DIR = "/models"
 
 # ─── GPU Images ───
 
-# WhisperX image: Python 3.11, Torch 2.5.1, Numpy <2.0 (for compatibility)
+# WhisperX image: Python 3.11 — let whisperx drive torch/pyannote versions
 whisperx_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch==2.5.1",
-        "torchaudio==2.5.1",
-        "numpy>=1.24.0,<2.0.0",
         "fastapi[standard]",
         "pydub",
-        gpu="a10g",
+        "huggingface_hub",
     )
     .pip_install(
         "whisperx @ git+https://github.com/m-bain/whisperx.git",
-        "pyannote.audio==3.3.2",
-        "huggingface_hub",
-    )
-    # Re-pin torch after pyannote.audio may have upgraded it
-    .pip_install(
-        "torch==2.5.1",
-        "torchaudio==2.5.1",
         gpu="a10g",
     )
     .env({
