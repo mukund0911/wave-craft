@@ -130,7 +130,7 @@ class WhisperXAgent(MCPAgent):
         logger.info("Loading diarization pipeline...")
         from whisperx.diarize import DiarizationPipeline
         self._diarize_pipeline = DiarizationPipeline(
-            use_auth_token=self.hf_token,
+            token=self.hf_token,
             device=self.device
         )
         logger.info("✓ Diarization pipeline loaded")

@@ -40,13 +40,18 @@ whisperx_image = (
     )
     .pip_install(
         "whisperx @ git+https://github.com/m-bain/whisperx.git",
-        "pyannote.audio>=3.1.0",
+        "pyannote.audio==3.3.2",
         "huggingface_hub",
+    )
+    # Re-pin torch after pyannote.audio may have upgraded it
+    .pip_install(
+        "torch==2.5.1",
+        "torchaudio==2.5.1",
+        gpu="a10g",
     )
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
         "TORCH_HOME": MODEL_CACHE_DIR,
-        "TRANSFORMERS_CACHE": f"{MODEL_CACHE_DIR}/transformers",
     })
 )
 
@@ -69,7 +74,6 @@ chatterbox_image = (
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
         "TORCH_HOME": MODEL_CACHE_DIR,
-        "TRANSFORMERS_CACHE": f"{MODEL_CACHE_DIR}/transformers",
     })
 )
 
@@ -120,7 +124,7 @@ class TranscribeService:
         if hf_token:
             from whisperx.diarize import DiarizationPipeline
             self.diarize_pipeline = DiarizationPipeline(
-                use_auth_token=hf_token, device=self.device
+                token=hf_token, device=self.device
             )
             logger.info("✓ Diarization pipeline loaded")
 
