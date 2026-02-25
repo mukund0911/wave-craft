@@ -13,24 +13,8 @@ import io
 import base64
 import tempfile
 import logging
-from typing import Optional
-from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-
-# ─── Request Models ───
-
-class TranscribeRequest(BaseModel):
-    audio: str
-    num_speakers: Optional[int] = None
-
-
-class SynthesizeRequest(BaseModel):
-    text: str
-    reference_audio: str = ""
-    exaggeration: float = 0.5
-
 
 # ─── Modal App Setup ───
 
@@ -144,14 +128,14 @@ class TranscribeService:
         model_volume.commit()
 
     @modal.fastapi_endpoint(method="POST")
-    def transcribe(self, request: TranscribeRequest):
+    def transcribe(self, request: dict):
         """Transcribe audio with diarization and word-level timestamps."""
         import torch
         from pydub import AudioSegment
 
         try:
-            audio_b64 = request.audio
-            num_speakers = request.num_speakers
+            audio_b64 = request.get("audio")
+            num_speakers = request.get("num_speakers")
 
             if not audio_b64:
                 return {"status": "error", "error": "No audio data provided"}
@@ -294,15 +278,15 @@ class TTSService:
         model_volume.commit()
 
     @modal.fastapi_endpoint(method="POST")
-    def synthesize(self, request: SynthesizeRequest):
+    def synthesize(self, request: dict):
         """Synthesize speech with voice cloning."""
         import torchaudio
         import tempfile
 
         try:
-            text = request.text
-            reference_audio_b64 = request.reference_audio
-            exaggeration = request.exaggeration
+            text = request.get("text", "")
+            reference_audio_b64 = request.get("reference_audio", "")
+            exaggeration = request.get("exaggeration", 0.5)
 
             if not text:
                 return {"status": "error", "error": "No text provided"}
