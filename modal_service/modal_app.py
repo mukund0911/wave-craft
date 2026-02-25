@@ -29,10 +29,11 @@ MODEL_CACHE_DIR = "/models"
 # WhisperX image: Python 3.11 — let whisperx drive torch/pyannote versions
 whisperx_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "git")
+    .apt_install("ffmpeg", "git", "libsndfile1")
     .pip_install(
         "fastapi[standard]",
         "pydub",
+        "soundfile",
         "huggingface_hub",
     )
     .pip_install(
@@ -42,6 +43,7 @@ whisperx_image = (
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
         "TORCH_HOME": MODEL_CACHE_DIR,
+        "PYANNOTE_AUDIO_USE_SOUNDFILE": "1",
     })
 )
 
