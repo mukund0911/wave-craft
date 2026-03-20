@@ -8,6 +8,7 @@ Supports two modes:
 import os
 import base64
 import logging
+import time
 import requests as http_requests
 from typing import Dict, Any, Optional
 from io import BytesIO
@@ -17,6 +18,24 @@ from .base_agent import MCPAgent
 logger = logging.getLogger(__name__)
 
 MODAL_TRANSCRIBE_URL = os.environ.get("MODAL_TRANSCRIBE_URL", "")
+
+
+def _request_with_retry(url, payload, timeout, max_retries=2):
+    """HTTP POST with exponential backoff retry."""
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = http_requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except (http_requests.exceptions.RequestException) as e:
+            last_err = e
+            if attempt < max_retries:
+                delay = (attempt + 1)  # 1s, 2s
+                logger.warning(f"Request attempt {attempt + 1} failed, retrying in {delay}s: {e}")
+                time.sleep(delay)
+    raise last_err
+
 
 # Lazy-loaded globals to avoid import overhead on startup
 _whisperx = None
@@ -168,12 +187,11 @@ class WhisperXAgent(MCPAgent):
             if num_speakers:
                 payload["num_speakers"] = num_speakers
 
-            response = http_requests.post(
+            response = _request_with_retry(
                 MODAL_TRANSCRIBE_URL,
-                json=payload,
+                payload,
                 timeout=300,
             )
-            response.raise_for_status()
             result = response.json()
 
             if result.get("status") == "completed":
@@ -225,12 +243,24 @@ class WhisperXAgent(MCPAgent):
             self._load_diarize_pipeline()
 
             if self._diarize_pipeline is not None:
-                diarize_args = {}
+                diarize_args = {"return_embeddings": True}
                 if num_speakers:
                     diarize_args["num_speakers"] = num_speakers
 
-                diarize_segments = self._diarize_pipeline(audio_path, **diarize_args)
+                diarize_result = self._diarize_pipeline(audio_path, **diarize_args)
+
+                # Unpack embeddings if returned
+                if isinstance(diarize_result, tuple):
+                    diarize_segments, speaker_embeddings = diarize_result
+                else:
+                    diarize_segments = diarize_result
+                    speaker_embeddings = None
+
                 result = whisperx.assign_word_speakers(diarize_segments, result)
+
+                # Auto-merge similar speakers based on embedding cosine similarity
+                if speaker_embeddings and not num_speakers:
+                    result = self._merge_similar_speakers(result, speaker_embeddings)
             else:
                 # No diarization — assign all to SPEAKER_00
                 for segment in result["segments"]:
@@ -344,6 +374,56 @@ class WhisperXAgent(MCPAgent):
             })
 
         return conversations
+
+    @staticmethod
+    def _merge_similar_speakers(result, speaker_embeddings, threshold=0.75):
+        """
+        Merge speakers whose voice embeddings are too similar.
+        Uses cosine similarity — if two speakers exceed the threshold,
+        the less-frequent one is relabeled to the more-frequent one.
+        """
+        import numpy as np
+
+        speakers = list(speaker_embeddings.keys())
+        if len(speakers) <= 1:
+            return result
+
+        embeddings = {s: np.array(e) for s, e in speaker_embeddings.items()}
+
+        merge_map = {}
+        for i in range(len(speakers)):
+            for j in range(i + 1, len(speakers)):
+                s1, s2 = speakers[i], speakers[j]
+                if s1 in merge_map or s2 in merge_map:
+                    continue
+                e1, e2 = embeddings[s1], embeddings[s2]
+                norm1, norm2 = np.linalg.norm(e1), np.linalg.norm(e2)
+                if norm1 == 0 or norm2 == 0:
+                    continue
+                similarity = np.dot(e1, e2) / (norm1 * norm2)
+                if similarity >= threshold:
+                    count1 = sum(1 for seg in result["segments"] if seg.get("speaker") == s1)
+                    count2 = sum(1 for seg in result["segments"] if seg.get("speaker") == s2)
+                    if count1 >= count2:
+                        merge_map[s2] = s1
+                    else:
+                        merge_map[s1] = s2
+                    logger.info(f"Merging speaker {s2 if count1 >= count2 else s1} "
+                                f"into {s1 if count1 >= count2 else s2} "
+                                f"(similarity={similarity:.3f})")
+
+        if not merge_map:
+            return result
+
+        for segment in result["segments"]:
+            speaker = segment.get("speaker", "")
+            if speaker in merge_map:
+                segment["speaker"] = merge_map[speaker]
+            for word in segment.get("words", []):
+                if word.get("speaker", "") in merge_map:
+                    word["speaker"] = merge_map[word["speaker"]]
+
+        return result
 
     def _audio_to_base64(self, audio_path: str) -> str:
         """Convert audio file to base64 WAV string"""

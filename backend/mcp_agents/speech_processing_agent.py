@@ -211,6 +211,17 @@ class SpeechProcessingAgent(MCPAgent):
                 "speaker": speaker
             }
 
+        # All words deleted — return silence instead of sending empty text to TTS
+        if not modified_text.strip():
+            logger.info(f"Speaker {speaker}: All words deleted, returning silence")
+            silence_b64 = self._generate_silence(duration_ms=100)
+            return {
+                "audio_base64": silence_b64,
+                "changed": True,
+                "speaker": speaker,
+                "method": "silence"
+            }
+
         # Use Chatterbox to re-synthesize
         logger.info(f"Speaker {speaker}: Processing changes (text_changed={text_changed}, emotions={len(emotions)})")
 
@@ -325,6 +336,21 @@ class SpeechProcessingAgent(MCPAgent):
             frames, _ = audioop.ratecv(frames, dst_sw, dst_ch, src_fr, dst_fr, None)
 
         return frames
+
+    @staticmethod
+    def _generate_silence(duration_ms: int = 100, sample_rate: int = 24000) -> str:
+        """Generate a short silent WAV clip as base64."""
+        num_samples = int(sample_rate * duration_ms / 1000)
+        silence_frames = b'\x00\x00' * num_samples  # 16-bit silence
+
+        buffer = BytesIO()
+        with wave.open(buffer, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(silence_frames)
+
+        return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
     # ──────────────────────────────────────────────────
     # Audio Optimization

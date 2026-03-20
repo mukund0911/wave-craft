@@ -9,6 +9,7 @@ import os
 import base64
 import logging
 import tempfile
+import time
 import requests as http_requests
 from io import BytesIO
 from typing import Dict, Any, Optional, List
@@ -18,6 +19,24 @@ from .base_agent import MCPAgent
 logger = logging.getLogger(__name__)
 
 MODAL_TTS_URL = os.environ.get("MODAL_TTS_URL", "")
+
+
+def _request_with_retry(url, payload, timeout, max_retries=2):
+    """HTTP POST with exponential backoff retry."""
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = http_requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except (http_requests.exceptions.RequestException) as e:
+            last_err = e
+            if attempt < max_retries:
+                delay = (attempt + 1)  # 1s, 2s
+                logger.warning(f"Request attempt {attempt + 1} failed, retrying in {delay}s: {e}")
+                time.sleep(delay)
+    raise last_err
+
 
 # Lazy-loaded globals
 _chatterbox_model = None
@@ -147,12 +166,11 @@ class ChatterboxAgent(MCPAgent):
             }
 
             logger.info(f"Sending TTS to Modal: '{processed_text[:60]}...'")
-            response = http_requests.post(
+            response = _request_with_retry(
                 MODAL_TTS_URL,
-                json=payload,
+                payload,
                 timeout=120,
             )
-            response.raise_for_status()
             result = response.json()
 
             if result.get("status") == "completed":

@@ -14,11 +14,14 @@ Removed:
 
 import os
 import json
+import uuid
 import hashlib
 import asyncio
 import logging
-import threading
 import base64
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from flask import Blueprint, request, jsonify, current_app
 
@@ -26,12 +29,68 @@ logger = logging.getLogger(__name__)
 
 main = Blueprint('main', __name__)
 
-# In-memory caches
-audio_cache = {}
-job_store = {}  # {job_id: {status, result, error, filepath}}
+
+# ──────────────────────────────────────────────────
+# TTL Cache
+# ──────────────────────────────────────────────────
+
+class TTLCache:
+    """Simple thread-safe TTL cache with max size eviction."""
+
+    def __init__(self, max_size=20, ttl_seconds=1800):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self._store = {}  # key -> (value, timestamp)
+        self._lock = threading.Lock()
+
+    def get(self, key, default=None):
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return default
+            value, ts = entry
+            if time.time() - ts > self.ttl_seconds:
+                del self._store[key]
+                return default
+            return value
+
+    def set(self, key, value):
+        with self._lock:
+            self._store[key] = (value, time.time())
+            self._evict()
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+    def __getitem__(self, key):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key, value):
+        self.set(key, value)
+
+    def _evict(self):
+        """Remove expired entries, then oldest if over capacity."""
+        now = time.time()
+        expired = [k for k, (_, ts) in self._store.items() if now - ts > self.ttl_seconds]
+        for k in expired:
+            del self._store[k]
+        while len(self._store) > self.max_size:
+            oldest_key = min(self._store, key=lambda k: self._store[k][1])
+            del self._store[oldest_key]
+
+
+# In-memory caches with TTL
+audio_cache = TTLCache(max_size=20, ttl_seconds=1800)
+job_store = TTLCache(max_size=100, ttl_seconds=3600)
 
 # Lock for thread-safe job_store access
 job_lock = threading.Lock()
+
+# Thread pool for background transcription
+_executor = ThreadPoolExecutor(max_workers=3)
 
 
 def get_speech_agent():
@@ -52,13 +111,15 @@ def file_hash(filepath: str) -> str:
 
 
 def save_upload(file) -> str:
-    """Save uploaded file to temp directory, return path"""
+    """Save uploaded file to temp directory with UUID suffix to prevent collisions, return path"""
     from werkzeug.utils import secure_filename
     upload_dir = os.path.join(os.path.dirname(__file__), 'uploads')
     os.makedirs(upload_dir, exist_ok=True)
 
     safe_name = secure_filename(file.filename) or 'upload.wav'
-    filepath = os.path.join(upload_dir, safe_name)
+    name, ext = os.path.splitext(safe_name)
+    unique_name = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(upload_dir, unique_name)
     file.save(filepath)
     return filepath
 
@@ -91,11 +152,26 @@ def upload_file():
         filepath = save_upload(file)
         logger.info(f"Upload received: {file.filename}")
 
+        # Parse optional num_speakers
+        num_speakers = request.form.get('num_speakers')
+        if num_speakers:
+            try:
+                num_speakers = int(num_speakers)
+                if num_speakers < 1 or num_speakers > 20:
+                    num_speakers = None
+            except (ValueError, TypeError):
+                num_speakers = None
+
         # Check cache
         fhash = file_hash(filepath)
         if fhash in audio_cache:
             logger.info(f"Cache hit: {fhash}")
             cached = audio_cache[fhash]
+            # Clean up the uploaded file since we have a cache hit
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
             return jsonify({
                 "status": "completed",
                 "conversations": cached["conversations"],
@@ -104,7 +180,6 @@ def upload_file():
             }), 200
 
         # Start async transcription in background thread
-        import uuid
         job_id = str(uuid.uuid4())
 
         with job_lock:
@@ -116,15 +191,9 @@ def upload_file():
                 "fhash": fhash
             }
 
-        # Run transcription in background thread
-        # Pass the actual Flask app so the thread can use its context
+        # Run transcription in thread pool
         app = current_app._get_current_object()
-        thread = threading.Thread(
-            target=_run_transcription,
-            args=(app, job_id, filepath, fhash),
-            daemon=True
-        )
-        thread.start()
+        _executor.submit(_run_transcription, app, job_id, filepath, fhash, num_speakers)
 
         return jsonify({
             "status": "processing",
@@ -137,17 +206,22 @@ def upload_file():
         return jsonify({"error": str(e)}), 500
 
 
-def _run_transcription(app, job_id: str, filepath: str, fhash: str):
+def _run_transcription(app, job_id: str, filepath: str, fhash: str, num_speakers: int = None):
     """Background transcription task"""
     try:
         with app.app_context():
             speech_agent = get_speech_agent()
-            result = speech_agent.transcribe_audio(filepath)
+            result = speech_agent.transcribe_audio(filepath, num_speakers=num_speakers)
 
             with job_lock:
                 if result["status"] == "completed":
-                    job_store[job_id]["status"] = "completed"
-                    job_store[job_id]["result"] = result
+                    job_store[job_id] = {
+                        "status": "completed",
+                        "result": result,
+                        "error": None,
+                        "filepath": filepath,
+                        "fhash": fhash
+                    }
 
                     # Cache the result
                     audio_cache[fhash] = {
@@ -155,14 +229,32 @@ def _run_transcription(app, job_id: str, filepath: str, fhash: str):
                         "full_audio": result["full_audio"]
                     }
                 else:
-                    job_store[job_id]["status"] = "error"
-                    job_store[job_id]["error"] = result.get("error", "Unknown error")
+                    job_store[job_id] = {
+                        "status": "error",
+                        "result": None,
+                        "error": result.get("error", "Unknown error"),
+                        "filepath": filepath,
+                        "fhash": fhash
+                    }
 
     except Exception as e:
         logger.error(f"Background transcription failed: {e}", exc_info=True)
         with job_lock:
-            job_store[job_id]["status"] = "error"
-            job_store[job_id]["error"] = str(e)
+            job_store[job_id] = {
+                "status": "error",
+                "result": None,
+                "error": str(e),
+                "filepath": filepath,
+                "fhash": fhash
+            }
+    finally:
+        # Always clean up uploaded file
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.info(f"Cleaned up upload: {filepath}")
+        except OSError as e:
+            logger.warning(f"Failed to clean up upload {filepath}: {e}")
 
 
 # ──────────────────────────────────────────────────
@@ -230,6 +322,12 @@ def modified_transcript():
         if not conversations:
             return jsonify({"error": "No conversations provided"}), 400
 
+        # Validate conversations
+        if not isinstance(conversations, list):
+            return jsonify({"error": "conversations must be a list"}), 400
+        if len(conversations) > 50:
+            return jsonify({"error": "Too many segments (max 50)"}), 400
+
         logger.info(f"Processing {len(conversations)} modified conversations")
 
         # Use speech agent to process modifications
@@ -242,12 +340,7 @@ def modified_transcript():
         }
 
         # Run async processing
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(speech_agent.process_request(request_data))
-        finally:
-            loop.close()
+        result = asyncio.run(speech_agent.process_request(request_data))
 
         if not result.get("success"):
             error_msg = result.get("error", "Processing failed")

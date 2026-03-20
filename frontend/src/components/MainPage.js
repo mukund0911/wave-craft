@@ -8,6 +8,15 @@ import '../styles/EmotionPicker.css';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+const GENERATION_MESSAGES = [
+    'Analyzing edits...',
+    'Cloning voices...',
+    'Synthesizing speech...',
+    'Assembling audio...',
+];
+
+const SESSION_KEY = 'wavecraft_session';
+
 /**
  * MainPage — Transcript Editor with Emotion Tagging
  *
@@ -28,9 +37,26 @@ class MainPage extends Component {
         const locationState = props.location?.state || (typeof window !== 'undefined'
             ? window.history.state?.usr : null) || {};
 
+        // Fall back to sessionStorage if navigation state is empty
+        let conversations = locationState.conversations || [];
+        let fullAudio = locationState.full_audio || '';
+
+        if (conversations.length === 0) {
+            try {
+                const saved = sessionStorage.getItem(SESSION_KEY);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    conversations = parsed.conversations || [];
+                    fullAudio = parsed.fullAudio || '';
+                }
+            } catch (e) {
+                // Ignore parse errors
+            }
+        }
+
         this.state = {
-            conversations: locationState.conversations || [],
-            fullAudio: locationState.full_audio || '',
+            conversations,
+            fullAudio,
             // Track modifications per conversation
             modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotions: {}, exaggeration: 0.5 } }
             // Emotion picker
@@ -42,14 +68,96 @@ class MainPage extends Component {
             insertText: '',
             // Generation
             isGenerating: false,
+            generationMessage: '',
             generatedAudio: null,
             generatedStats: null,
             // Playback
             currentlyPlaying: null,
+            downloadPlaybackProgress: 0,
+            isPlayingGenerated: false,
+            // Toast
+            toast: null, // { message, type: 'error'|'info' }
         };
 
         this.audioRef = React.createRef();
+        this._abortController = null;
+        this._generationMsgInterval = null;
+        this._toastTimeout = null;
     }
+
+    componentDidMount() {
+        this._saveSession();
+
+        // Unsaved changes warning
+        this._beforeUnloadHandler = (e) => {
+            const stats = this.getEditStats();
+            if (stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', this._beforeUnloadHandler);
+
+        // Keyboard shortcuts
+        this._keydownHandler = (e) => {
+            if (e.key === 'Escape') {
+                if (this.state.showEmotionPicker) {
+                    this.handleCloseEmotionPicker();
+                } else if (this.state.insertMode) {
+                    this.setState({ insertMode: null, insertText: '' });
+                }
+            }
+        };
+        window.addEventListener('keydown', this._keydownHandler);
+    }
+
+    componentWillUnmount() {
+        // Pause audio
+        const audio = this.audioRef.current;
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+
+        // Abort pending requests
+        if (this._abortController) {
+            this._abortController.abort();
+        }
+
+        // Remove event listeners
+        window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+        window.removeEventListener('keydown', this._keydownHandler);
+
+        // Clear intervals/timeouts
+        if (this._generationMsgInterval) clearInterval(this._generationMsgInterval);
+        if (this._toastTimeout) clearTimeout(this._toastTimeout);
+    }
+
+    _saveSession() {
+        const { conversations, fullAudio } = this.state;
+        if (conversations.length > 0) {
+            try {
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+                    conversations,
+                    fullAudio,
+                }));
+            } catch (e) {
+                // sessionStorage might be full — ignore
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────
+    // Toast notifications
+    // ──────────────────────────────────────────────────
+
+    showToast = (message, type = 'error') => {
+        if (this._toastTimeout) clearTimeout(this._toastTimeout);
+        this.setState({ toast: { message, type } });
+        this._toastTimeout = setTimeout(() => {
+            this.setState({ toast: null });
+        }, 4000);
+    };
 
     // ──────────────────────────────────────────────────
     // Data helpers
@@ -100,13 +208,22 @@ class MainPage extends Component {
         e.preventDefault();
         const rect = e.target.getBoundingClientRect();
 
+        const pickerHeight = 280;
+        const pickerWidth = 340;
+        let top = rect.bottom + 8;
+        let left = Math.min(rect.left, window.innerWidth - pickerWidth);
+
+        // Flip above if it would overflow bottom
+        if (top + pickerHeight > window.innerHeight) {
+            top = rect.top - pickerHeight - 8;
+        }
+        // Clamp top to viewport
+        top = Math.max(8, top);
+
         this.setState({
             showEmotionPicker: true,
             emotionPickerTarget: { convKey, wordIndex },
-            emotionPickerPosition: {
-                top: rect.bottom + 8,
-                left: Math.min(rect.left, window.innerWidth - 340),
-            },
+            emotionPickerPosition: { top, left },
         });
     };
 
@@ -157,6 +274,15 @@ class MainPage extends Component {
         mods.insertedWords = insertedWords;
         this.setMods(insertMode.convKey, mods);
         this.setState({ insertMode: null, insertText: '' });
+    };
+
+    handleInsertBlur = () => {
+        // Delay to allow click events (e.g. on other buttons) to fire first
+        setTimeout(() => {
+            if (this.state.insertMode) {
+                this.handleInsertSubmit();
+            }
+        }, 200);
     };
 
     handleInsertKeyDown = (e) => {
@@ -251,7 +377,10 @@ class MainPage extends Component {
 
         audio.src = `data:audio/wav;base64,${audioB64}`;
         audio.onended = () => this.setState({ currentlyPlaying: null });
-        audio.play();
+        audio.play().catch((err) => {
+            console.warn('Playback blocked:', err);
+            this.showToast('Playback was blocked by the browser. Click to interact first.', 'info');
+        });
         this.setState({ currentlyPlaying: convKey });
     };
 
@@ -260,7 +389,26 @@ class MainPage extends Component {
     // ──────────────────────────────────────────────────
 
     handleGenerate = async () => {
-        this.setState({ isGenerating: true, generatedAudio: null });
+        // Guard: already generating
+        if (this.state.isGenerating) return;
+
+        // Guard: no edits
+        const stats = this.getEditStats();
+        if (stats.deleted === 0 && stats.inserted === 0 && stats.emotions === 0) return;
+
+        this._abortController = new AbortController();
+
+        // Start rotating generation messages
+        let msgIndex = 0;
+        this.setState({
+            isGenerating: true,
+            generatedAudio: null,
+            generationMessage: GENERATION_MESSAGES[0],
+        });
+        this._generationMsgInterval = setInterval(() => {
+            msgIndex = (msgIndex + 1) % GENERATION_MESSAGES.length;
+            this.setState({ generationMessage: GENERATION_MESSAGES[msgIndex] });
+        }, 3000);
 
         try {
             const conversationsUpdated = this.state.conversations.map(convItem => {
@@ -293,10 +441,15 @@ class MainPage extends Component {
                     response = await axios.post(
                         `${apiUrl}/conversations_modified`,
                         formData,
-                        { headers: { 'content-type': 'multipart/form-data' } }
+                        {
+                            headers: { 'content-type': 'multipart/form-data' },
+                            timeout: 180000,
+                            signal: this._abortController.signal,
+                        }
                     );
                     break;
                 } catch (retryErr) {
+                    if (retryErr.name === 'CanceledError' || retryErr.name === 'AbortError') throw retryErr;
                     const status = retryErr.response?.status;
                     if ((status === 503 || !retryErr.response) && attempt < 2) {
                         await new Promise(r => setTimeout(r, 3000));
@@ -306,50 +459,78 @@ class MainPage extends Component {
                 }
             }
 
+            if (this._generationMsgInterval) clearInterval(this._generationMsgInterval);
+
             this.setState({
                 isGenerating: false,
+                generationMessage: '',
                 generatedAudio: response.data.modified_audio,
-                generatedStats: response.data.stats,
+                generatedStats: {
+                    segments_processed: response.data.segments_processed,
+                    segments_changed: response.data.segments_changed,
+                    ...response.data.stats,
+                },
             });
 
         } catch (err) {
+            if (this._generationMsgInterval) clearInterval(this._generationMsgInterval);
+            if (err.name === 'CanceledError' || err.name === 'AbortError') return;
             console.error('Generation error:', err);
-            this.setState({
-                isGenerating: false,
-            });
-            alert(err.response?.data?.error || 'Failed to generate audio. Please try again.');
+            this.setState({ isGenerating: false, generationMessage: '' });
+            this.showToast(err.response?.data?.error || 'Failed to generate audio. Please try again.');
         }
     };
 
     // ──────────────────────────────────────────────────
-    // Download
+    // Download (non-blocking)
     // ──────────────────────────────────────────────────
 
-    handleDownload = () => {
+    handleDownload = async () => {
         const { generatedAudio } = this.state;
         if (!generatedAudio) return;
 
-        const bytes = atob(generatedAudio);
-        const array = new Uint8Array(bytes.length);
-        for (let i = 0; i < bytes.length; i++) {
-            array[i] = bytes.charCodeAt(i);
+        try {
+            const response = await fetch(`data:audio/wav;base64,${generatedAudio}`);
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'wavecraft_modified.wav';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Download error:', err);
+            this.showToast('Download failed. Please try again.');
         }
-        const blob = new Blob([array], { type: 'audio/wav' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'wavecraft_modified.wav';
-        a.click();
-        URL.revokeObjectURL(url);
     };
 
     handlePlayGenerated = () => {
-        const { generatedAudio } = this.state;
+        const { generatedAudio, isPlayingGenerated } = this.state;
         if (!generatedAudio || !this.audioRef.current) return;
 
         const audio = this.audioRef.current;
+
+        if (isPlayingGenerated) {
+            audio.pause();
+            audio.currentTime = 0;
+            this.setState({ isPlayingGenerated: false, downloadPlaybackProgress: 0 });
+            return;
+        }
+
         audio.src = `data:audio/wav;base64,${generatedAudio}`;
-        audio.play();
+        audio.ontimeupdate = () => {
+            if (audio.duration) {
+                this.setState({ downloadPlaybackProgress: (audio.currentTime / audio.duration) * 100 });
+            }
+        };
+        audio.onended = () => {
+            this.setState({ isPlayingGenerated: false, downloadPlaybackProgress: 0 });
+        };
+        audio.play().catch((err) => {
+            console.warn('Playback blocked:', err);
+            this.showToast('Playback was blocked by the browser.', 'info');
+        });
+        this.setState({ isPlayingGenerated: true });
     };
 
     // ──────────────────────────────────────────────────
@@ -389,7 +570,7 @@ class MainPage extends Component {
                     value={this.state.insertText}
                     onChange={(e) => this.setState({ insertText: e.target.value })}
                     onKeyDown={this.handleInsertKeyDown}
-                    onBlur={this.handleInsertSubmit}
+                    onBlur={this.handleInsertBlur}
                     autoFocus
                     style={{
                         background: 'rgba(5, 150, 105, 0.08)',
@@ -442,7 +623,7 @@ class MainPage extends Component {
                     onClick={() => this.handleWordClick(convKey, i)}
                     onContextMenu={(e) => this.handleWordRightClick(e, convKey, i)}
                     onDoubleClick={() => this.handleInsertClick(convKey, i)}
-                    title={isDeleted ? 'Click to restore' : 'Click to delete • Right-click for emotion • Double-click to insert after'}
+                    title={isDeleted ? 'Click to restore' : 'Click to delete \u2022 Right-click for emotion \u2022 Double-click to insert after'}
                 >
                     {words[i]}
                     {emotion && !emotion.isParalinguistic && (
@@ -466,7 +647,7 @@ class MainPage extends Component {
                         value={this.state.insertText}
                         onChange={(e) => this.setState({ insertText: e.target.value })}
                         onKeyDown={this.handleInsertKeyDown}
-                        onBlur={this.handleInsertSubmit}
+                        onBlur={this.handleInsertBlur}
                         autoFocus
                         style={{
                             background: 'rgba(5, 150, 105, 0.08)',
@@ -519,9 +700,12 @@ class MainPage extends Component {
         const {
             conversations, showEmotionPicker, emotionPickerTarget,
             emotionPickerPosition, isGenerating, generatedAudio,
+            generationMessage, generatedStats, toast,
+            isPlayingGenerated, downloadPlaybackProgress,
         } = this.state;
 
         const stats = this.getEditStats();
+        const hasEdits = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0;
 
         return (
             <div className="main-page">
@@ -579,14 +763,14 @@ class MainPage extends Component {
                                             onClick={() => this.handleInsertClick(key, -1)}
                                             title="Insert text at beginning"
                                         >
-                                            ➕ Insert
+                                            + Insert
                                         </button>
                                         <button
                                             className={`action-btn ${Object.keys(mods.emotions || {}).length > 0 ? 'active' : ''}`}
                                             onClick={(e) => this.handleWordRightClick(e, key, 0)}
                                             title="Add emotion to first word"
                                         >
-                                            😊 Emotion
+                                            Emotion
                                         </button>
 
                                         {data.original?.speaker_audio && (
@@ -594,7 +778,7 @@ class MainPage extends Component {
                                                 className="play-btn"
                                                 onClick={() => this.playSegmentAudio(key, data.original.speaker_audio)}
                                             >
-                                                {this.state.currentlyPlaying === key ? '⏹ Stop' : '▶ Play'}
+                                                {this.state.currentlyPlaying === key ? 'Stop' : 'Play'}
                                             </button>
                                         )}
                                     </div>
@@ -626,27 +810,20 @@ class MainPage extends Component {
                             </span>
                         </div>
 
-                        <button
-                            className="generate-btn"
-                            onClick={this.handleGenerate}
-                            disabled={isGenerating}
-                        >
-                            {isGenerating ? (
-                                <>⏳ Generating...</>
-                            ) : (
-                                <>🎵 Generate Modified Audio</>
-                            )}
-                        </button>
-                    </div>
-                )}
-
-                {/* Loading Overlay */}
-                {isGenerating && (
-                    <div className="loading-overlay">
-                        <div className="loading-spinner"></div>
-                        <div className="loading-text">
-                            Generating modified audio with voice cloning...
-                        </div>
+                        {isGenerating ? (
+                            <div className="generation-progress">
+                                <div className="generation-spinner"></div>
+                                <span className="generation-message">{generationMessage}</span>
+                            </div>
+                        ) : (
+                            <button
+                                className="generate-btn"
+                                onClick={this.handleGenerate}
+                                disabled={!hasEdits}
+                            >
+                                Generate Modified Audio
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -654,31 +831,59 @@ class MainPage extends Component {
                 {generatedAudio && (
                     <div className="download-panel">
                         <div className="download-card">
-                            <h3>✨ Audio Generated!</h3>
+                            <div className="download-checkmark">
+                                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                                    <circle cx="24" cy="24" r="23" stroke="#0a0a0a" strokeWidth="2"/>
+                                    <path d="M15 24L21 30L33 18" stroke="#0a0a0a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            </div>
+                            <h3>Audio Generated</h3>
+                            {generatedStats && (
+                                <div className="download-stats">
+                                    <span>{generatedStats.segments_processed || 0} segments processed</span>
+                                    <span className="download-stats-separator">/</span>
+                                    <span>{generatedStats.segments_changed || 0} changed</span>
+                                </div>
+                            )}
                             <p>
-                                Modified audio is ready.
                                 Play to preview or download the file.
                             </p>
+
+                            {/* Playback progress bar */}
+                            {isPlayingGenerated && (
+                                <div className="download-playback-bar">
+                                    <div
+                                        className="download-playback-fill"
+                                        style={{ width: `${downloadPlaybackProgress}%` }}
+                                    />
+                                </div>
+                            )}
+
                             <div className="download-actions">
                                 <button className="btn-secondary" onClick={this.handlePlayGenerated}>
-                                    ▶ Play
+                                    {isPlayingGenerated ? 'Stop' : 'Listen'}
                                 </button>
                                 <button className="btn-primary" onClick={this.handleDownload}>
-                                    ⬇ Download WAV
+                                    Download WAV
                                 </button>
                             </div>
                             <button
-                                style={{
-                                    marginTop: '16px',
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--text-muted)',
-                                    cursor: 'pointer',
-                                    fontSize: '0.85rem',
+                                className="btn-back-to-editor"
+                                onClick={() => {
+                                    const audio = this.audioRef.current;
+                                    if (audio) {
+                                        audio.pause();
+                                        audio.currentTime = 0;
+                                    }
+                                    this.setState({
+                                        generatedAudio: null,
+                                        currentlyPlaying: null,
+                                        isPlayingGenerated: false,
+                                        downloadPlaybackProgress: 0,
+                                    });
                                 }}
-                                onClick={() => this.setState({ generatedAudio: null })}
                             >
-                                ← Back to Editor
+                                Back to Editor
                             </button>
                         </div>
                     </div>
@@ -704,6 +909,13 @@ class MainPage extends Component {
                             }
                         />
                     </>
+                )}
+
+                {/* Toast notification */}
+                {toast && (
+                    <div className={`toast-notification toast-${toast.type || 'error'}`}>
+                        {toast.message}
+                    </div>
                 )}
 
                 {/* Hidden audio element */}

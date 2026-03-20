@@ -22,7 +22,8 @@ def create_app():
          origins=ALLOWED_ORIGINS,
          methods=['GET', 'POST', 'OPTIONS'],
          allow_headers=['Content-Type'],
-         expose_headers=['Content-Type'])
+         expose_headers=['Content-Type'],
+         max_age=3600)
 
     # Error handlers with CORS headers
     @app.errorhandler(503)

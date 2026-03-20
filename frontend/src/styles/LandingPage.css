@@ -199,6 +199,44 @@ body {
     font-weight: 300;
 }
 
+/* Speaker Count */
+.speaker-count-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.speaker-count-label {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.speaker-count-input {
+    width: 64px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    text-align: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.speaker-count-input:focus {
+    border-color: var(--border-hover);
+}
+
+.speaker-count-input::placeholder {
+    color: var(--text-muted);
+}
+
 /* Upload Progress */
 .upload-progress {
     margin-top: 24px;

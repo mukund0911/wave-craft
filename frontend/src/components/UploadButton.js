@@ -5,6 +5,8 @@ import '../styles/LandingPage.css';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
 /**
  * Premium Upload Button with drag-and-drop zone and animated progress.
  */
@@ -17,9 +19,21 @@ class UploadButtonClass extends Component {
             progress: 0,
             statusText: '',
             error: null,
+            numSpeakers: '',
         };
         this.fileInputRef = React.createRef();
+        this._unmounted = false;
     }
+
+    componentWillUnmount() {
+        this._unmounted = true;
+    }
+
+    _safeSetState = (update) => {
+        if (!this._unmounted) {
+            this.setState(update);
+        }
+    };
 
     handleDragOver = (e) => {
         e.preventDefault();
@@ -51,6 +65,16 @@ class UploadButtonClass extends Component {
     };
 
     uploadFile = async (file) => {
+        // File validation
+        if (!file.type.startsWith('audio/')) {
+            this.setState({ error: 'Please upload an audio file (WAV, MP3, M4A, FLAC, OGG).' });
+            return;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+            this.setState({ error: 'File too large. Maximum size is 50MB.' });
+            return;
+        }
+
         this.setState({
             isUploading: true,
             progress: 10,
@@ -60,26 +84,33 @@ class UploadButtonClass extends Component {
 
         const formData = new FormData();
         formData.append('file', file);
+        if (this.state.numSpeakers) {
+            formData.append('num_speakers', this.state.numSpeakers);
+        }
 
         try {
             const response = await axios.post(`${apiUrl}/upload`, formData, {
                 headers: { 'content-type': 'multipart/form-data' },
                 onUploadProgress: (progressEvent) => {
                     const pct = Math.round((progressEvent.loaded * 40) / progressEvent.total) + 10;
-                    this.setState({ progress: pct, statusText: 'Uploading audio...' });
+                    this._safeSetState({ progress: pct, statusText: 'Uploading audio...' });
                 },
             });
+
+            if (this._unmounted) return;
 
             if (response.data.status === 'completed') {
                 // Immediate result (cached)
                 this.setState({ progress: 100, statusText: 'Complete!' });
                 setTimeout(() => {
-                    this.props.navigate('/result', {
-                        state: {
-                            conversations: response.data.conversations,
-                            full_audio: response.data.full_audio,
-                        },
-                    });
+                    if (!this._unmounted) {
+                        this.props.navigate('/result', {
+                            state: {
+                                conversations: response.data.conversations,
+                                full_audio: response.data.full_audio,
+                            },
+                        });
+                    }
                 }, 400);
             } else if (response.data.job_id) {
                 // Async — poll for status
@@ -88,7 +119,7 @@ class UploadButtonClass extends Component {
             }
         } catch (err) {
             console.error('Upload error:', err);
-            this.setState({
+            this._safeSetState({
                 isUploading: false,
                 error: err.response?.data?.error || 'Upload failed. Please try again.',
                 progress: 0,
@@ -102,8 +133,9 @@ class UploadButtonClass extends Component {
         const maxAttempts = 120;
 
         const poll = async () => {
+            if (this._unmounted) return;
             if (attempts >= maxAttempts) {
-                this.setState({
+                this._safeSetState({
                     isUploading: false,
                     error: 'Processing timed out. Please try again.',
                     progress: 0,
@@ -113,22 +145,25 @@ class UploadButtonClass extends Component {
 
             try {
                 const response = await axios.get(`${apiUrl}/status/${jobId}`);
+                if (this._unmounted) return;
 
                 if (response.data.status === 'completed') {
-                    this.setState({ progress: 100, statusText: 'Complete!' });
+                    this._safeSetState({ progress: 100, statusText: 'Complete!' });
                     setTimeout(() => {
-                        this.props.navigate('/result', {
-                            state: {
-                                conversations: response.data.conversations,
-                                full_audio: response.data.full_audio,
-                            },
-                        });
+                        if (!this._unmounted) {
+                            this.props.navigate('/result', {
+                                state: {
+                                    conversations: response.data.conversations,
+                                    full_audio: response.data.full_audio,
+                                },
+                            });
+                        }
                     }, 400);
                     return;
                 }
 
                 if (response.data.status === 'error') {
-                    this.setState({
+                    this._safeSetState({
                         isUploading: false,
                         error: response.data.error || 'Processing failed.',
                         progress: 0,
@@ -139,17 +174,18 @@ class UploadButtonClass extends Component {
                 // Still processing
                 attempts++;
                 const progressVal = Math.min(50 + (attempts / maxAttempts) * 45, 95);
-                this.setState({
+                this._safeSetState({
                     progress: progressVal,
                     statusText: 'Transcribing audio...',
                 });
                 setTimeout(poll, 1000);
             } catch (err) {
+                if (this._unmounted) return;
                 attempts++;
                 if (attempts < maxAttempts) {
                     setTimeout(poll, 2000);
                 } else {
-                    this.setState({
+                    this._safeSetState({
                         isUploading: false,
                         error: 'Connection lost. Please try again.',
                         progress: 0,
@@ -161,38 +197,62 @@ class UploadButtonClass extends Component {
         poll();
     };
 
+    handleNumSpeakersChange = (e) => {
+        const val = e.target.value;
+        if (val === '' || (/^\d+$/.test(val) && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 20)) {
+            this.setState({ numSpeakers: val });
+        }
+    };
+
     render() {
-        const { isDragging, isUploading, progress, statusText, error } = this.state;
+        const { isDragging, isUploading, progress, statusText, error, numSpeakers } = this.state;
 
         return (
             <div>
                 {!isUploading ? (
-                    <div
-                        className={`upload-dropzone ${isDragging ? 'dragover' : ''}`}
-                        onDragOver={this.handleDragOver}
-                        onDragLeave={this.handleDragLeave}
-                        onDrop={this.handleDrop}
-                        onClick={this.handleClick}
-                    >
-                        <span className="upload-icon">
-                            {isDragging ? '📥' : '🎧'}
-                        </span>
-                        <div className="upload-text">
-                            {isDragging
-                                ? 'Drop your audio here'
-                                : 'Drop audio file or click to browse'}
+                    <>
+                        <div
+                            className={`upload-dropzone ${isDragging ? 'dragover' : ''}`}
+                            onDragOver={this.handleDragOver}
+                            onDragLeave={this.handleDragLeave}
+                            onDrop={this.handleDrop}
+                            onClick={this.handleClick}
+                        >
+                            <span className="upload-icon">
+                                {isDragging ? '📥' : '🎧'}
+                            </span>
+                            <div className="upload-text">
+                                {isDragging
+                                    ? 'Drop your audio here'
+                                    : 'Drop audio file or click to browse'}
+                            </div>
+                            <div className="upload-subtext">
+                                Supports WAV, MP3, M4A, FLAC, OGG (max 50MB)
+                            </div>
+                            <input
+                                type="file"
+                                ref={this.fileInputRef}
+                                onChange={this.handleFileChange}
+                                accept="audio/*"
+                                style={{ display: 'none' }}
+                            />
                         </div>
-                        <div className="upload-subtext">
-                            Supports WAV, MP3, M4A, FLAC, OGG
+                        <div className="speaker-count-row" onClick={(e) => e.stopPropagation()}>
+                            <label htmlFor="num-speakers" className="speaker-count-label">
+                                Speakers (optional)
+                            </label>
+                            <input
+                                id="num-speakers"
+                                type="number"
+                                min="1"
+                                max="20"
+                                placeholder="Auto"
+                                value={numSpeakers}
+                                onChange={this.handleNumSpeakersChange}
+                                className="speaker-count-input"
+                            />
                         </div>
-                        <input
-                            type="file"
-                            ref={this.fileInputRef}
-                            onChange={this.handleFileChange}
-                            accept="audio/*"
-                            style={{ display: 'none' }}
-                        />
-                    </div>
+                    </>
                 ) : (
                     <div className="upload-progress">
                         <div className="progress-bar-wrapper">
