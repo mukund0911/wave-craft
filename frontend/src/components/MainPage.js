@@ -137,9 +137,23 @@ class MainPage extends Component {
         const { conversations, fullAudio } = this.state;
         if (conversations.length > 0) {
             try {
+                // Save conversations without speaker_audio to stay within sessionStorage limits
+                const lightConversations = conversations.map(convItem => {
+                    const key = Object.keys(convItem)[0];
+                    const data = convItem[key];
+                    return {
+                        [key]: {
+                            ...data,
+                            original: {
+                                ...data.original,
+                                speaker_audio: '', // strip heavy audio data
+                            }
+                        }
+                    };
+                });
                 sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-                    conversations,
-                    fullAudio,
+                    conversations: lightConversations,
+                    fullAudio: '', // too large for sessionStorage
                 }));
             } catch (e) {
                 // sessionStorage might be full — ignore
