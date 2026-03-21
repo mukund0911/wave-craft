@@ -246,6 +246,9 @@ class WhisperXAgent(MCPAgent):
                 diarize_args = {"return_embeddings": True}
                 if num_speakers:
                     diarize_args["num_speakers"] = num_speakers
+                else:
+                    diarize_args["min_speakers"] = 2
+                    diarize_args["max_speakers"] = 10
 
                 diarize_result = self._diarize_pipeline(audio_path, **diarize_args)
 
@@ -379,10 +382,11 @@ class WhisperXAgent(MCPAgent):
     def _merge_similar_speakers(result, speaker_embeddings, threshold=0.65):
         """
         Merge speakers whose voice embeddings are too similar.
-        Uses cosine similarity — if two speakers exceed the threshold,
-        the less-frequent one is relabeled to the more-frequent one.
+        Uses Union-Find for transitive merges — if A~B and B~C, all three merge.
+        The most-frequent speaker in each group becomes the canonical label.
         """
         import numpy as np
+        from collections import defaultdict
 
         speakers = list(speaker_embeddings.keys())
         if len(speakers) <= 1:
@@ -390,27 +394,45 @@ class WhisperXAgent(MCPAgent):
 
         embeddings = {s: np.array(e) for s, e in speaker_embeddings.items()}
 
-        merge_map = {}
+        # Union-Find
+        parent = {s: s for s in speakers}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            parent[find(a)] = find(b)
+
         for i in range(len(speakers)):
             for j in range(i + 1, len(speakers)):
                 s1, s2 = speakers[i], speakers[j]
-                if s1 in merge_map or s2 in merge_map:
-                    continue
                 e1, e2 = embeddings[s1], embeddings[s2]
                 norm1, norm2 = np.linalg.norm(e1), np.linalg.norm(e2)
                 if norm1 == 0 or norm2 == 0:
                     continue
                 similarity = np.dot(e1, e2) / (norm1 * norm2)
                 if similarity >= threshold:
-                    count1 = sum(1 for seg in result["segments"] if seg.get("speaker") == s1)
-                    count2 = sum(1 for seg in result["segments"] if seg.get("speaker") == s2)
-                    if count1 >= count2:
-                        merge_map[s2] = s1
-                    else:
-                        merge_map[s1] = s2
-                    logger.info(f"Merging speaker {s2 if count1 >= count2 else s1} "
-                                f"into {s1 if count1 >= count2 else s2} "
-                                f"(similarity={similarity:.3f})")
+                    union(s1, s2)
+                    logger.info(f"Linking speakers {s1} <-> {s2} (similarity={similarity:.3f})")
+
+        # Build groups and pick canonical (most segments) per group
+        groups = defaultdict(list)
+        for s in speakers:
+            groups[find(s)].append(s)
+
+        merge_map = {}
+        for members in groups.values():
+            if len(members) <= 1:
+                continue
+            counts = {s: sum(1 for seg in result["segments"] if seg.get("speaker") == s) for s in members}
+            canonical = max(members, key=lambda s: counts[s])
+            for s in members:
+                if s != canonical:
+                    merge_map[s] = canonical
+                    logger.info(f"Merging speaker {s} into {canonical}")
 
         if not merge_map:
             return result

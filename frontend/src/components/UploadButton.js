@@ -19,7 +19,6 @@ class UploadButtonClass extends Component {
             progress: 0,
             statusText: '',
             error: null,
-            numSpeakers: '',
         };
         this.fileInputRef = React.createRef();
         this._unmounted = false;
@@ -84,9 +83,6 @@ class UploadButtonClass extends Component {
 
         const formData = new FormData();
         formData.append('file', file);
-        if (this.state.numSpeakers) {
-            formData.append('num_speakers', this.state.numSpeakers);
-        }
 
         try {
             const response = await axios.post(`${apiUrl}/upload`, formData, {
@@ -197,15 +193,8 @@ class UploadButtonClass extends Component {
         poll();
     };
 
-    handleNumSpeakersChange = (e) => {
-        const val = e.target.value;
-        if (val === '' || (/^\d+$/.test(val) && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 20)) {
-            this.setState({ numSpeakers: val });
-        }
-    };
-
     render() {
-        const { isDragging, isUploading, progress, statusText, error, numSpeakers } = this.state;
+        const { isDragging, isUploading, progress, statusText, error } = this.state;
 
         return (
             <div>
@@ -235,21 +224,6 @@ class UploadButtonClass extends Component {
                                 onChange={this.handleFileChange}
                                 accept="audio/*"
                                 style={{ display: 'none' }}
-                            />
-                        </div>
-                        <div className="speaker-count-row" onClick={(e) => e.stopPropagation()}>
-                            <label htmlFor="num-speakers" className="speaker-count-label">
-                                Speakers (optional)
-                            </label>
-                            <input
-                                id="num-speakers"
-                                type="number"
-                                min="1"
-                                max="20"
-                                placeholder="Auto"
-                                value={numSpeakers}
-                                onChange={this.handleNumSpeakersChange}
-                                className="speaker-count-input"
                             />
                         </div>
                     </>
