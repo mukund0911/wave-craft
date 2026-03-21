@@ -71,11 +71,10 @@ class MainPage extends Component {
         this.state = {
             conversations,
             fullAudio,
-            modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotions: {}, exaggeration: 0.5 } }
-            // Selection-based emotion
-            selectionTooltip: null, // { top, left, convKey, wordIndices }
+            modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotion: null, exaggeration: 0.5 } }
+            // Speaker-click emotion
             showEmotionPicker: false,
-            emotionPickerTarget: null, // { convKey, wordIndices }
+            emotionPickerTarget: null, // { convKey }
             emotionPickerPosition: { top: 0, left: 0 },
             // Right-click sounds menu
             soundsMenu: null, // { top, left, convKey, afterWordIndex }
@@ -207,7 +206,7 @@ class MainPage extends Component {
         return this.state.modifications[convKey] || {
             deletedWords: new Set(),
             insertedWords: [], // [{ afterIndex, text }]
-            emotions: {},      // { wordIndex: { type, intensity } }
+            emotion: null,     // { type, intensity } — segment-level
             exaggeration: 0.5,
         };
     }
@@ -244,89 +243,29 @@ class MainPage extends Component {
     };
 
     // ──────────────────────────────────────────────────
-    // Selection-based emotion
+    // Speaker-click emotion
     // ──────────────────────────────────────────────────
 
-    handleTextMouseUp = (convKey) => {
-        // Short delay to let the selection settle
-        setTimeout(() => {
-            const sel = window.getSelection();
-            if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-                this.setState({ selectionTooltip: null });
-                return;
-            }
+    handleSpeakerClick = (e, convKey) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        let top = rect.bottom + 6;
+        let left = rect.left;
 
-            // Find all word spans in the selection
-            const range = sel.getRangeAt(0);
-            const wordIndices = [];
-            const container = range.commonAncestorContainer.nodeType === 1
-                ? range.commonAncestorContainer
-                : range.commonAncestorContainer.parentElement;
-
-            // Walk up to find .transcript-text
-            let transcriptText = container;
-            while (transcriptText && !transcriptText.classList?.contains('transcript-text')) {
-                transcriptText = transcriptText.parentElement;
-            }
-            if (!transcriptText) return;
-
-            const wordSpans = transcriptText.querySelectorAll('.word[data-word-index]');
-            for (const span of wordSpans) {
-                if (sel.containsNode(span, true)) {
-                    wordIndices.push(parseInt(span.dataset.wordIndex, 10));
-                }
-            }
-
-            if (wordIndices.length === 0) {
-                this.setState({ selectionTooltip: null });
-                return;
-            }
-
-            const rect = range.getBoundingClientRect();
-            this.setState({
-                selectionTooltip: {
-                    top: rect.top - 36,
-                    left: rect.left + rect.width / 2,
-                    convKey,
-                    wordIndices,
-                },
-            });
-        }, 10);
-    };
-
-    handleSelectionEmotionClick = () => {
-        const { selectionTooltip } = this.state;
-        if (!selectionTooltip) return;
+        // Clamp to viewport
+        if (top + 120 > window.innerHeight) top = rect.top - 120;
+        if (left + 220 > window.innerWidth) left = window.innerWidth - 230;
 
         this.setState({
             showEmotionPicker: true,
-            emotionPickerTarget: {
-                convKey: selectionTooltip.convKey,
-                wordIndices: selectionTooltip.wordIndices,
-            },
-            emotionPickerPosition: {
-                top: selectionTooltip.top + 44,
-                left: selectionTooltip.left - 100,
-            },
-            selectionTooltip: null,
+            emotionPickerTarget: { convKey },
+            emotionPickerPosition: { top, left },
         });
-        window.getSelection()?.removeAllRanges();
     };
 
     handleEmotionSelect = (emotion) => {
-        const { convKey, wordIndices } = this.state.emotionPickerTarget;
+        const { convKey } = this.state.emotionPickerTarget;
         const mods = { ...this.getMods(convKey) };
-        const emotions = { ...mods.emotions };
-
-        for (const idx of wordIndices) {
-            if (emotion === null) {
-                delete emotions[idx];
-            } else {
-                emotions[idx] = emotion;
-            }
-        }
-
-        mods.emotions = emotions;
+        mods.emotion = emotion;
         this.setMods(convKey, mods);
         this.setState({ showEmotionPicker: false, emotionPickerTarget: null });
     };
@@ -475,15 +414,8 @@ class MainPage extends Component {
     }
 
     buildEmotionsList(mods) {
-        const emotions = [];
-        for (const [wordIndex, emotion] of Object.entries(mods.emotions || {})) {
-            emotions.push({
-                type: emotion.type,
-                intensity: emotion.intensity || 0.5,
-                wordIndex: parseInt(wordIndex),
-            });
-        }
-        return emotions;
+        if (!mods.emotion) return [];
+        return [{ type: mods.emotion.type, intensity: mods.emotion.intensity || 0.7 }];
     }
 
     // ──────────────────────────────────────────────────
@@ -543,11 +475,10 @@ class MainPage extends Component {
                 const modifiedText = this.buildModifiedText(data.original.text, mods);
                 const emotions = this.buildEmotionsList(mods);
 
-                // Derive exaggeration from highest emotion intensity
-                const toneEmotions = emotions.filter(e => !e.type.startsWith('['));
-                const maxIntensity = toneEmotions.reduce((max, e) => Math.max(max, e.intensity), 0);
-                const exaggeration = maxIntensity > 0
-                    ? maxIntensity * 2.0
+                // Derive exaggeration from segment emotion intensity
+                const emotion = emotions[0];
+                const exaggeration = emotion
+                    ? emotion.intensity * 2.0
                     : (mods.exaggeration || 0.5);
 
                 return {
@@ -676,7 +607,7 @@ class MainPage extends Component {
         for (const [, mods] of Object.entries(this.state.modifications)) {
             deleted += (mods.deletedWords?.size || 0);
             inserted += (mods.insertedWords?.length || 0);
-            emotions += Object.keys(mods.emotions || {}).length;
+            emotions += mods.emotion ? 1 : 0;
             if (deleted > 0 || inserted > 0 || emotions > 0) modified++;
         }
 
@@ -744,13 +675,8 @@ class MainPage extends Component {
 
             // The word itself
             const isDeleted = mods.deletedWords.has(i);
-            const emotion = mods.emotions[i];
             let className = 'word';
             if (isDeleted) className += ' deleted';
-            if (emotion) className += ` has-emotion ${emotion.type}`;
-
-            const emotionEmoji = emotion && !emotion.isParalinguistic
-                ? EMOTION_EMOJIS[emotion.type] : null;
 
             elements.push(
                 <span
@@ -763,9 +689,6 @@ class MainPage extends Component {
                     onDoubleClick={() => this.handleInsertClick(convKey, i)}
                 >
                     {words[i]}
-                    {emotionEmoji && (
-                        <span className="emotion-emoji-badge">{emotionEmoji}</span>
-                    )}
                 </span>
             );
 
@@ -853,7 +776,7 @@ class MainPage extends Component {
                         <p className="page-header-instructions">
                             <span>Click to delete</span>
                             <span className="instruction-dot"></span>
-                            <span>Select text to add emotion</span>
+                            <span>Click speaker to add emotion</span>
                             <span className="instruction-dot"></span>
                             <span>Right-click to add sounds</span>
                             <span className="instruction-dot"></span>
@@ -885,7 +808,7 @@ class MainPage extends Component {
                         const mods = this.getMods(key);
                         const isModified = (mods.deletedWords?.size > 0) ||
                             (mods.insertedWords?.length > 0) ||
-                            Object.keys(mods.emotions || {}).length > 0;
+                            !!mods.emotion;
 
                         return (
                             <div
@@ -893,13 +816,18 @@ class MainPage extends Component {
                                 className="speaker-section"
                                 style={{ animationDelay: `${idx * 0.05}s` }}
                             >
-                                <div className="speaker-header">
+                                <div className="speaker-header" onClick={(e) => this.handleSpeakerClick(e, key)}>
                                     <div className={`speaker-avatar ${this.getSpeakerClass(data.speaker)}`}>
                                         {data.speaker}
                                     </div>
                                     <span className="speaker-name">
                                         Speaker {data.speaker}
                                     </span>
+                                    {mods.emotion && (
+                                        <span className="segment-emotion-badge" title={mods.emotion.type}>
+                                            {EMOTION_EMOJIS[mods.emotion.type]}
+                                        </span>
+                                    )}
                                     {data.original?.start !== undefined && (
                                         <span className="speaker-time">
                                             {formatTime(data.original.start)} — {formatTime(data.original.end)}
@@ -908,10 +836,7 @@ class MainPage extends Component {
                                 </div>
 
                                 <div className={`transcript-block ${isModified ? 'modified' : ''}`}>
-                                    <div
-                                        className="transcript-text"
-                                        onMouseUp={() => this.handleTextMouseUp(key)}
-                                    >
+                                    <div className="transcript-text">
                                         {this.renderWords(key, data.original.text, mods)}
                                     </div>
 
@@ -1030,27 +955,6 @@ class MainPage extends Component {
                             </button>
                         </div>
                     </div>
-                )}
-
-                {/* Selection tooltip — "Add emotion" */}
-                {this.state.selectionTooltip && (
-                    <>
-                        <div
-                            style={{ position: 'fixed', inset: 0, zIndex: 198 }}
-                            onClick={() => this.setState({ selectionTooltip: null })}
-                        />
-                        <div
-                            className="selection-tooltip"
-                            style={{
-                                position: 'fixed',
-                                top: this.state.selectionTooltip.top,
-                                left: this.state.selectionTooltip.left,
-                            }}
-                            onClick={this.handleSelectionEmotionClick}
-                        >
-                            Add emotion
-                        </div>
-                    </>
                 )}
 
                 {/* Emoji-only emotion picker */}

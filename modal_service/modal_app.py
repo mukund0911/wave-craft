@@ -62,7 +62,7 @@ chatterbox_image = (
         gpu="a10g",
     )
     .pip_install(
-        "chatterbox-tts>=0.1.0",
+        "chatterbox-tts>=0.1.1",
     )
     .env({
         "HF_HOME": MODEL_CACHE_DIR,
@@ -342,7 +342,7 @@ class TranscribeService:
     gpu="A10G",
     timeout=300,
     volumes={MODEL_CACHE_DIR: model_volume},
-    scaledown_window=300,
+    scaledown_window=600,
     concurrency_limit=4,
 )
 class TTSService:
@@ -353,17 +353,35 @@ class TTSService:
         from chatterbox.tts import ChatterboxTTS
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Chatterbox Turbo on {self.device}...")
+        logger.info(f"Loading Chatterbox on {self.device}...")
 
         # Try Turbo first, fall back to base if unavailable
         try:
             from chatterbox.tts_turbo import ChatterboxTurboTTS
             self.model = ChatterboxTurboTTS.from_pretrained(self.device)
-            logger.info("✓ Chatterbox Turbo loaded")
         except (ImportError, Exception) as e:
             logger.warning(f"Turbo unavailable ({e}), falling back to base model")
             self.model = ChatterboxTTS.from_pretrained(self.device)
-            logger.info("✓ Chatterbox base loaded")
+
+        self.model_type = type(self.model).__name__
+        logger.info(f"✓ Loaded model: {self.model_type}")
+
+        # torch.compile for faster inference (first run triggers compilation)
+        try:
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            logger.info("✓ torch.compile applied (reduce-overhead)")
+        except Exception as e:
+            logger.warning(f"torch.compile failed, using eager mode: {e}")
+
+        # Warmup to trigger compilation at startup, not on first user request
+        try:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                dummy = self.model.generate("Hello.", audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5)
+            del dummy
+            torch.cuda.empty_cache()
+            logger.info("✓ Warmup complete")
+        except Exception as e:
+            logger.warning(f"Warmup failed (non-fatal): {e}")
 
         self.torch = torch
         model_volume.commit()
@@ -391,13 +409,14 @@ class TTSService:
                     f.write(audio_bytes)
                     ref_path = f.name
 
-            # Generate speech
-            wav = self.model.generate(
-                text,
-                audio_prompt_path=ref_path,
-                exaggeration=exaggeration,
-                cfg_weight=cfg_weight,
-            )
+            # Generate speech with FP16 autocast for speed
+            with self.torch.autocast(device_type="cuda", dtype=self.torch.float16):
+                wav = self.model.generate(
+                    text,
+                    audio_prompt_path=ref_path,
+                    exaggeration=exaggeration,
+                    cfg_weight=cfg_weight,
+                )
 
             # Convert tensor to base64 WAV
             buffer = io.BytesIO()
@@ -422,6 +441,15 @@ class TTSService:
         except Exception as e:
             logger.error(f"TTS failed: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
+
+    @modal.fastapi_endpoint(method="GET")
+    def info(self):
+        """Return model type and device for diagnostics."""
+        return {
+            "status": "ok",
+            "model_type": getattr(self, "model_type", "unknown"),
+            "device": str(self.device),
+        }
 
 
 # ─── Health Check ───
