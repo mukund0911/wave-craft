@@ -1,6 +1,10 @@
-import React, { Component } from 'react';
+import React, { Component, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import WaveSurfer from 'wavesurfer.js';
 import Header from './Header';
 import '../styles/MainPage.css';
 
@@ -30,6 +34,112 @@ const SOUNDS = [
     { tag: '[sniff]', emoji: '🤧' },
     { tag: '[shush]', emoji: '🤫' },
 ];
+
+// ──────────────────────────────────────────────────
+// Waveform component (functional, uses wavesurfer.js)
+// ──────────────────────────────────────────────────
+function WaveformPreview({ audioBase64, isPlaying, onPlayPause, height = 40 }) {
+    const containerRef = useRef(null);
+    const wsRef = useRef(null);
+
+    useEffect(() => {
+        if (!containerRef.current || !audioBase64) return;
+
+        const ws = WaveSurfer.create({
+            container: containerRef.current,
+            height,
+            barWidth: 2,
+            barGap: 1,
+            barRadius: 2,
+            waveColor: 'rgba(0, 0, 0, 0.2)',
+            progressColor: '#0a0a0a',
+            cursorWidth: 0,
+            interact: true,
+            normalize: true,
+        });
+
+        ws.load(`data:audio/wav;base64,${audioBase64}`);
+        ws.on('finish', () => onPlayPause && onPlayPause(false));
+        wsRef.current = ws;
+
+        return () => ws.destroy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [audioBase64]);
+
+    useEffect(() => {
+        if (!wsRef.current) return;
+        if (isPlaying) {
+            wsRef.current.play();
+        } else {
+            wsRef.current.pause();
+        }
+    }, [isPlaying]);
+
+    if (!audioBase64) return null;
+    return <div ref={containerRef} className="waveform-container" />;
+}
+
+// ──────────────────────────────────────────────────
+// Sortable segment wrapper (functional, uses dnd-kit)
+// ──────────────────────────────────────────────────
+function SortableSegment({ id, children }) {
+    const {
+        attributes, listeners, setNodeRef,
+        transform, transition, isDragging,
+    } = useSortable({ id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        position: 'relative',
+    };
+
+    return (
+        <div ref={setNodeRef} style={style} {...attributes}>
+            <div className="drag-handle" {...listeners} title="Drag to reorder">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="rgba(0,0,0,0.2)">
+                    <circle cx="3" cy="2" r="1.2"/><circle cx="9" cy="2" r="1.2"/>
+                    <circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/>
+                    <circle cx="3" cy="10" r="1.2"/><circle cx="9" cy="10" r="1.2"/>
+                </svg>
+            </div>
+            {children}
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────
+// DnD wrapper (functional, wraps class component's conversation list)
+// ──────────────────────────────────────────────────
+function SortableConversationList({ conversations, onReorder, children }) {
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    );
+
+    const ids = conversations.map((item, idx) => {
+        const key = Object.keys(item)[0];
+        return key;
+    });
+
+    const handleDragEnd = useCallback((event) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const oldIndex = ids.indexOf(active.id);
+        const newIndex = ids.indexOf(over.id);
+        if (oldIndex !== -1 && newIndex !== -1) {
+            onReorder(oldIndex, newIndex);
+        }
+    }, [ids, onReorder]);
+
+    return (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                {children}
+            </SortableContext>
+        </DndContext>
+    );
+}
 
 /**
  * MainPage — Transcript Editor with Emotion Tagging
@@ -281,6 +391,16 @@ class MainPage extends Component {
         this._undoStack.push(currentSnapshot);
         const next = this._redoStack.pop();
         this.setState({ modifications: next });
+    };
+
+    // ──────────────────────────────────────────────────
+    // Drag-to-reorder segments
+    // ──────────────────────────────────────────────────
+
+    handleReorder = (oldIndex, newIndex) => {
+        this.setState(prev => ({
+            conversations: arrayMove(prev.conversations, oldIndex, newIndex),
+        }));
     };
 
     // ──────────────────────────────────────────────────
@@ -879,6 +999,8 @@ class MainPage extends Component {
                             <span>Double-click to insert</span>
                             <span className="instruction-dot"></span>
                             <span>Ctrl+Z to undo</span>
+                            <span className="instruction-dot"></span>
+                            <span>Drag to reorder</span>
                         </p>
                         <div className="page-header-actions">
                             <button className="header-action-btn" onClick={this.handleExportSRT} title="Export transcript as SRT subtitles">
@@ -906,57 +1028,72 @@ class MainPage extends Component {
                                 Go to Upload
                             </Link>
                         </div>
-                    ) : conversations.map((convItem, idx) => {
-                        const { key, data } = this.getConvData(convItem);
-                        const mods = this.getMods(key);
-                        const isModified = (mods.deletedWords?.size > 0) ||
-                            (mods.insertedWords?.length > 0) ||
-                            !!mods.emotion;
+                    ) : (
+                        <SortableConversationList
+                            conversations={conversations}
+                            onReorder={this.handleReorder}
+                        >
+                            {conversations.map((convItem, idx) => {
+                                const { key, data } = this.getConvData(convItem);
+                                const mods = this.getMods(key);
+                                const isModified = (mods.deletedWords?.size > 0) ||
+                                    (mods.insertedWords?.length > 0) ||
+                                    !!mods.emotion;
 
-                        return (
-                            <div
-                                key={key}
-                                className="speaker-section"
-                                style={{ animationDelay: `${idx * 0.05}s` }}
-                            >
-                                <div className="speaker-header" onClick={(e) => this.handleSpeakerClick(e, key)}>
-                                    <div className={`speaker-avatar ${this.getSpeakerClass(data.speaker)}`}>
-                                        {data.speaker}
-                                    </div>
-                                    <span className="speaker-name">
-                                        Speaker {data.speaker}
-                                    </span>
-                                    {mods.emotion && (
-                                        <span className="segment-emotion-badge" title={mods.emotion.type}>
-                                            {EMOTION_EMOJIS[mods.emotion.type]}
-                                        </span>
-                                    )}
-                                    {data.original?.start !== undefined && (
-                                        <span className="speaker-time">
-                                            {formatTime(data.original.start)} — {formatTime(data.original.end)}
-                                        </span>
-                                    )}
-                                </div>
+                                return (
+                                    <SortableSegment key={key} id={key}>
+                                        <div
+                                            className="speaker-section"
+                                            style={{ animationDelay: `${idx * 0.05}s` }}
+                                        >
+                                            <div className="speaker-header" onClick={(e) => this.handleSpeakerClick(e, key)}>
+                                                <div className={`speaker-avatar ${this.getSpeakerClass(data.speaker)}`}>
+                                                    {data.speaker}
+                                                </div>
+                                                <span className="speaker-name">
+                                                    Speaker {data.speaker}
+                                                </span>
+                                                {mods.emotion && (
+                                                    <span className="segment-emotion-badge" title={mods.emotion.type}>
+                                                        {EMOTION_EMOJIS[mods.emotion.type]}
+                                                    </span>
+                                                )}
+                                                {data.original?.start !== undefined && (
+                                                    <span className="speaker-time">
+                                                        {formatTime(data.original.start)} — {formatTime(data.original.end)}
+                                                    </span>
+                                                )}
+                                            </div>
 
-                                <div className={`transcript-block ${isModified ? 'modified' : ''}`}>
-                                    <div className="transcript-text">
-                                        {this.renderWords(key, data.original.text, mods)}
-                                    </div>
+                                            <div className={`transcript-block ${isModified ? 'modified' : ''}`}>
+                                                <div className="transcript-text">
+                                                    {this.renderWords(key, data.original.text, mods)}
+                                                </div>
 
-                                    {data.original?.speaker_audio && (
-                                        <div className="transcript-actions">
-                                            <button
-                                                className="play-btn"
-                                                onClick={() => this.playSegmentAudio(key, data.original.speaker_audio)}
-                                            >
-                                                {this.state.currentlyPlaying === key ? 'Stop' : 'Play'}
-                                            </button>
+                                                {data.original?.speaker_audio && (
+                                                    <div className="transcript-actions">
+                                                        <WaveformPreview
+                                                            audioBase64={data.original.speaker_audio}
+                                                            isPlaying={this.state.currentlyPlaying === key}
+                                                            onPlayPause={(playing) => {
+                                                                if (!playing) this.setState({ currentlyPlaying: null });
+                                                            }}
+                                                        />
+                                                        <button
+                                                            className="play-btn"
+                                                            onClick={() => this.playSegmentAudio(key, data.original.speaker_audio)}
+                                                        >
+                                                            {this.state.currentlyPlaying === key ? 'Stop' : 'Play'}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
+                                    </SortableSegment>
+                                );
+                            })}
+                        </SortableConversationList>
+                    )}
                 </div>
 
                 {/* Bottom Generate Bar */}
