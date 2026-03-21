@@ -376,7 +376,7 @@ class WhisperXAgent(MCPAgent):
         return conversations
 
     @staticmethod
-    def _merge_similar_speakers(result, speaker_embeddings, threshold=0.75):
+    def _merge_similar_speakers(result, speaker_embeddings, threshold=0.65):
         """
         Merge speakers whose voice embeddings are too similar.
         Uses cosine similarity — if two speakers exceed the threshold,

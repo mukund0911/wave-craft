@@ -83,6 +83,11 @@ class MainPage extends Component {
         this._abortController = null;
         this._generationMsgInterval = null;
         this._toastTimeout = null;
+
+        // Merge speakers
+        this.state.showMergeModal = false;
+        this.state.mergeSource = null;  // speaker being merged away
+        this.state.mergeTarget = null;  // speaker to merge into
     }
 
     componentDidMount() {
@@ -548,6 +553,42 @@ class MainPage extends Component {
     };
 
     // ──────────────────────────────────────────────────
+    // Merge speakers
+    // ──────────────────────────────────────────────────
+
+    getUniqueSpeakers() {
+        const speakers = new Set();
+        for (const convItem of this.state.conversations) {
+            const { data } = this.getConvData(convItem);
+            speakers.add(data.speaker);
+        }
+        return Array.from(speakers).sort();
+    }
+
+    handleMergeSpeakers = () => {
+        const { mergeSource, mergeTarget, conversations } = this.state;
+        if (!mergeSource || !mergeTarget || mergeSource === mergeTarget) return;
+
+        const updated = conversations.map(convItem => {
+            const key = Object.keys(convItem)[0];
+            const data = convItem[key];
+            if (data.speaker === mergeSource) {
+                return { [key]: { ...data, speaker: mergeTarget } };
+            }
+            return convItem;
+        });
+
+        this.setState({
+            conversations: updated,
+            showMergeModal: false,
+            mergeSource: null,
+            mergeTarget: null,
+        }, () => this._saveSession());
+
+        this.showToast(`Merged Speaker ${mergeSource} into Speaker ${mergeTarget}`, 'info');
+    };
+
+    // ──────────────────────────────────────────────────
     // Stats
     // ──────────────────────────────────────────────────
 
@@ -716,26 +757,56 @@ class MainPage extends Component {
             emotionPickerPosition, isGenerating, generatedAudio,
             generationMessage, generatedStats, toast,
             isPlayingGenerated, downloadPlaybackProgress,
+            showMergeModal, mergeSource, mergeTarget,
         } = this.state;
 
         const stats = this.getEditStats();
         const hasEdits = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0;
+        const uniqueSpeakers = this.getUniqueSpeakers();
 
         return (
             <div className="main-page">
-                {/* Same Header as landing page */}
                 <Header />
+
+                {/* Page Header */}
+                {conversations.length > 0 && (
+                    <div className="page-header">
+                        <h1>Transcript Editor</h1>
+                        <p>Click words to delete, right-click for emotions, double-click to insert</p>
+                        {uniqueSpeakers.length > 1 && (
+                            <div className="page-header-actions">
+                                <button
+                                    className="merge-speakers-btn"
+                                    onClick={() => this.setState({ showMergeModal: true, mergeSource: null, mergeTarget: null })}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                                        <circle cx="9" cy="7" r="4"/>
+                                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                    </svg>
+                                    Merge Speakers
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Conversations */}
                 <div className="main-content">
                     {conversations.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)' }}>
-                            <p style={{ fontSize: '1.2rem', marginBottom: '8px' }}>No transcript loaded</p>
+                        <div className="empty-state">
+                            <div className="empty-state-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                                    <line x1="12" y1="19" x2="12" y2="23"/>
+                                    <line x1="8" y1="23" x2="16" y2="23"/>
+                                </svg>
+                            </div>
+                            <h2>No transcript loaded</h2>
                             <p>Upload an audio file to get started.</p>
-                            <Link to="/" className="btn-primary" style={{
-                                display: 'inline-flex', marginTop: '20px',
-                                textDecoration: 'none'
-                            }}>
+                            <Link to="/" className="btn-primary" style={{ textDecoration: 'none' }}>
                                 Go to Upload
                             </Link>
                         </div>
@@ -899,6 +970,67 @@ class MainPage extends Component {
                             >
                                 Back to Editor
                             </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Merge Speakers Modal */}
+                {showMergeModal && (
+                    <div className="merge-modal-backdrop" onClick={() => this.setState({ showMergeModal: false })}>
+                        <div className="merge-modal" onClick={(e) => e.stopPropagation()}>
+                            <h3>Merge Speakers</h3>
+                            <p>Select two speakers to merge. The first will be relabeled as the second.</p>
+
+                            <div style={{ marginBottom: '12px' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 500 }}>
+                                    Merge this speaker...
+                                </div>
+                                <div className="merge-speaker-list">
+                                    {uniqueSpeakers.map(s => (
+                                        <div
+                                            key={`src-${s}`}
+                                            className={`merge-speaker-option ${mergeSource === s ? 'selected' : ''}`}
+                                            onClick={() => this.setState({ mergeSource: s })}
+                                        >
+                                            <div className={`speaker-avatar ${this.getSpeakerClass(s)}`}>{s}</div>
+                                            <span>Speaker {s}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {mergeSource && (
+                                <div style={{ marginBottom: '20px' }}>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 500 }}>
+                                        ...into this speaker
+                                    </div>
+                                    <div className="merge-speaker-list">
+                                        {uniqueSpeakers.filter(s => s !== mergeSource).map(s => (
+                                            <div
+                                                key={`tgt-${s}`}
+                                                className={`merge-speaker-option ${mergeTarget === s ? 'selected' : ''}`}
+                                                onClick={() => this.setState({ mergeTarget: s })}
+                                            >
+                                                <div className={`speaker-avatar ${this.getSpeakerClass(s)}`}>{s}</div>
+                                                <span>Speaker {s}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="merge-modal-actions">
+                                <button className="btn-cancel" onClick={() => this.setState({ showMergeModal: false })}>
+                                    Cancel
+                                </button>
+                                <button
+                                    className="btn-merge"
+                                    disabled={!mergeSource || !mergeTarget}
+                                    onClick={this.handleMergeSpeakers}
+                                >
+                                    Merge
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}
