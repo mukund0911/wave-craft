@@ -2,9 +2,7 @@ import React, { Component } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import Header from './Header';
-import EmotionPicker from './EmotionPicker';
 import '../styles/MainPage.css';
-import '../styles/EmotionPicker.css';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -16,6 +14,19 @@ const GENERATION_MESSAGES = [
 ];
 
 const SESSION_KEY = 'wavecraft_session';
+
+const EMOTION_EMOJIS = {
+    happy: '😊', sad: '😢', angry: '😠', excited: '🤩',
+    calm: '😌', fearful: '😨', surprised: '😲', neutral: '😐',
+};
+
+const SOUNDS = [
+    { tag: '[laugh]', emoji: '😂' },
+    { tag: '[sigh]', emoji: '😮‍💨' },
+    { tag: '[gasp]', emoji: '😱' },
+    { tag: '[cough]', emoji: '🤧' },
+    { tag: '[chuckle]', emoji: '🤭' },
+];
 
 /**
  * MainPage — Transcript Editor with Emotion Tagging
@@ -57,12 +68,14 @@ class MainPage extends Component {
         this.state = {
             conversations,
             fullAudio,
-            // Track modifications per conversation
             modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotions: {}, exaggeration: 0.5 } }
-            // Emotion picker
+            // Selection-based emotion
+            selectionTooltip: null, // { top, left, convKey, wordIndices }
             showEmotionPicker: false,
-            emotionPickerTarget: null, // { convKey, wordIndex }
+            emotionPickerTarget: null, // { convKey, wordIndices }
             emotionPickerPosition: { top: 0, left: 0 },
+            // Right-click sounds menu
+            soundsMenu: null, // { top, left, convKey, afterWordIndex }
             // Insert mode
             insertMode: null, // { convKey, afterWordIndex }
             insertText: '',
@@ -76,7 +89,7 @@ class MainPage extends Component {
             downloadPlaybackProgress: 0,
             isPlayingGenerated: false,
             // Toast
-            toast: null, // { message, type: 'error'|'info' }
+            toast: null,
         };
 
         this.audioRef = React.createRef();
@@ -104,6 +117,10 @@ class MainPage extends Component {
             if (e.key === 'Escape') {
                 if (this.state.showEmotionPicker) {
                     this.handleCloseEmotionPicker();
+                } else if (this.state.soundsMenu) {
+                    this.setState({ soundsMenu: null });
+                } else if (this.state.selectionTooltip) {
+                    this.setState({ selectionTooltip: null });
                 } else if (this.state.insertMode) {
                     this.setState({ insertMode: null, insertText: '' });
                 }
@@ -206,6 +223,10 @@ class MainPage extends Component {
     // ──────────────────────────────────────────────────
 
     handleWordClick = (convKey, wordIndex) => {
+        // If there's an active text selection, don't toggle delete
+        const sel = window.getSelection();
+        if (sel && sel.toString().trim().length > 0) return;
+
         const mods = { ...this.getMods(convKey) };
         const deletedWords = new Set(mods.deletedWords);
 
@@ -219,46 +240,133 @@ class MainPage extends Component {
         this.setMods(convKey, mods);
     };
 
-    handleWordRightClick = (e, convKey, wordIndex) => {
-        e.preventDefault();
-        const rect = e.target.getBoundingClientRect();
+    // ──────────────────────────────────────────────────
+    // Selection-based emotion
+    // ──────────────────────────────────────────────────
 
-        const pickerHeight = 280;
-        const pickerWidth = 340;
-        let top = rect.bottom + 8;
-        let left = Math.min(rect.left, window.innerWidth - pickerWidth);
+    handleTextMouseUp = (convKey) => {
+        // Short delay to let the selection settle
+        setTimeout(() => {
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+                this.setState({ selectionTooltip: null });
+                return;
+            }
 
-        // Flip above if it would overflow bottom
-        if (top + pickerHeight > window.innerHeight) {
-            top = rect.top - pickerHeight - 8;
-        }
-        // Clamp top to viewport
-        top = Math.max(8, top);
+            // Find all word spans in the selection
+            const range = sel.getRangeAt(0);
+            const wordIndices = [];
+            const container = range.commonAncestorContainer.nodeType === 1
+                ? range.commonAncestorContainer
+                : range.commonAncestorContainer.parentElement;
+
+            // Walk up to find .transcript-text
+            let transcriptText = container;
+            while (transcriptText && !transcriptText.classList?.contains('transcript-text')) {
+                transcriptText = transcriptText.parentElement;
+            }
+            if (!transcriptText) return;
+
+            const wordSpans = transcriptText.querySelectorAll('.word[data-word-index]');
+            for (const span of wordSpans) {
+                if (sel.containsNode(span, true)) {
+                    wordIndices.push(parseInt(span.dataset.wordIndex, 10));
+                }
+            }
+
+            if (wordIndices.length === 0) {
+                this.setState({ selectionTooltip: null });
+                return;
+            }
+
+            const rect = range.getBoundingClientRect();
+            this.setState({
+                selectionTooltip: {
+                    top: rect.top - 36,
+                    left: rect.left + rect.width / 2,
+                    convKey,
+                    wordIndices,
+                },
+            });
+        }, 10);
+    };
+
+    handleSelectionEmotionClick = () => {
+        const { selectionTooltip } = this.state;
+        if (!selectionTooltip) return;
 
         this.setState({
             showEmotionPicker: true,
-            emotionPickerTarget: { convKey, wordIndex },
-            emotionPickerPosition: { top, left },
+            emotionPickerTarget: {
+                convKey: selectionTooltip.convKey,
+                wordIndices: selectionTooltip.wordIndices,
+            },
+            emotionPickerPosition: {
+                top: selectionTooltip.top + 44,
+                left: selectionTooltip.left - 100,
+            },
+            selectionTooltip: null,
         });
+        window.getSelection()?.removeAllRanges();
     };
 
     handleEmotionSelect = (emotion) => {
-        const { convKey, wordIndex } = this.state.emotionPickerTarget;
+        const { convKey, wordIndices } = this.state.emotionPickerTarget;
         const mods = { ...this.getMods(convKey) };
         const emotions = { ...mods.emotions };
 
-        if (emotion === null) {
-            delete emotions[wordIndex];
-        } else {
-            emotions[wordIndex] = emotion;
+        for (const idx of wordIndices) {
+            if (emotion === null) {
+                delete emotions[idx];
+            } else {
+                emotions[idx] = emotion;
+            }
         }
 
         mods.emotions = emotions;
         this.setMods(convKey, mods);
+        this.setState({ showEmotionPicker: false, emotionPickerTarget: null });
     };
 
     handleCloseEmotionPicker = () => {
         this.setState({ showEmotionPicker: false, emotionPickerTarget: null });
+    };
+
+    // ──────────────────────────────────────────────────
+    // Right-click sounds menu
+    // ──────────────────────────────────────────────────
+
+    handleWordRightClick = (e, convKey, wordIndex) => {
+        e.preventDefault();
+        const rect = e.target.getBoundingClientRect();
+        let top = rect.bottom + 6;
+        let left = rect.left;
+
+        // Clamp
+        if (top + 200 > window.innerHeight) top = rect.top - 200;
+        if (left + 180 > window.innerWidth) left = window.innerWidth - 190;
+        top = Math.max(8, top);
+
+        this.setState({
+            soundsMenu: { top, left, convKey, afterWordIndex: wordIndex },
+            selectionTooltip: null,
+        });
+    };
+
+    handleSoundSelect = (tag) => {
+        const { soundsMenu } = this.state;
+        if (!soundsMenu) return;
+
+        const mods = { ...this.getMods(soundsMenu.convKey) };
+        const insertedWords = [...(mods.insertedWords || [])];
+        insertedWords.push({
+            afterIndex: soundsMenu.afterWordIndex,
+            text: tag,
+            isParalinguistic: true,
+        });
+        mods.insertedWords = insertedWords;
+        this.setMods(soundsMenu.convKey, mods);
+        this.setState({ soundsMenu: null });
     };
 
     // ──────────────────────────────────────────────────
@@ -631,20 +739,22 @@ class MainPage extends Component {
             if (isDeleted) className += ' deleted';
             if (emotion) className += ` has-emotion ${emotion.type}`;
 
+            const emotionEmoji = emotion && !emotion.isParalinguistic
+                ? EMOTION_EMOJIS[emotion.type] : null;
+
             elements.push(
                 <span
                     key={`w-${i}`}
                     className={className}
+                    data-word-index={i}
+                    data-conv-key={convKey}
                     onClick={() => this.handleWordClick(convKey, i)}
                     onContextMenu={(e) => this.handleWordRightClick(e, convKey, i)}
                     onDoubleClick={() => this.handleInsertClick(convKey, i)}
-                    title={isDeleted ? 'Click to restore' : 'Click to delete \u2022 Right-click for emotion \u2022 Double-click to insert after'}
                 >
                     {words[i]}
-                    {emotion && !emotion.isParalinguistic && (
-                        <span className={`emotion-chip ${emotion.type}`}>
-                            {emotion.type}
-                        </span>
+                    {emotionEmoji && (
+                        <span className="emotion-emoji-badge">{emotionEmoji}</span>
                     )}
                 </span>
             );
@@ -730,7 +840,15 @@ class MainPage extends Component {
                 {conversations.length > 0 && (
                     <div className="page-header">
                         <h1>Transcript Editor</h1>
-                        <p>Click words to delete, right-click for emotions, double-click to insert</p>
+                        <p className="page-header-instructions">
+                            <span>Click to delete</span>
+                            <span className="instruction-dot"></span>
+                            <span>Select text to add emotion</span>
+                            <span className="instruction-dot"></span>
+                            <span>Right-click to add sounds</span>
+                            <span className="instruction-dot"></span>
+                            <span>Double-click to insert</span>
+                        </p>
                     </div>
                 )}
 
@@ -780,28 +898,23 @@ class MainPage extends Component {
                                 </div>
 
                                 <div className={`transcript-block ${isModified ? 'modified' : ''}`}>
-                                    <div className="transcript-text">
+                                    <div
+                                        className="transcript-text"
+                                        onMouseUp={() => this.handleTextMouseUp(key)}
+                                    >
                                         {this.renderWords(key, data.original.text, mods)}
                                     </div>
 
-                                    <div className="transcript-actions">
-                                        <button
-                                            className={`action-btn ${Object.keys(mods.emotions || {}).length > 0 ? 'active' : ''}`}
-                                            onClick={(e) => this.handleWordRightClick(e, key, 0)}
-                                            title="Add emotion to first word"
-                                        >
-                                            Emotion
-                                        </button>
-
-                                        {data.original?.speaker_audio && (
+                                    {data.original?.speaker_audio && (
+                                        <div className="transcript-actions">
                                             <button
                                                 className="play-btn"
                                                 onClick={() => this.playSegmentAudio(key, data.original.speaker_audio)}
                                             >
                                                 {this.state.currentlyPlaying === key ? 'Stop' : 'Play'}
                                             </button>
-                                        )}
-                                    </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -909,25 +1022,93 @@ class MainPage extends Component {
                     </div>
                 )}
 
-                {/* Emotion Picker Popover */}
+                {/* Selection tooltip — "Add emotion" */}
+                {this.state.selectionTooltip && (
+                    <>
+                        <div
+                            style={{ position: 'fixed', inset: 0, zIndex: 198 }}
+                            onClick={() => this.setState({ selectionTooltip: null })}
+                        />
+                        <div
+                            className="selection-tooltip"
+                            style={{
+                                position: 'fixed',
+                                top: this.state.selectionTooltip.top,
+                                left: this.state.selectionTooltip.left,
+                            }}
+                            onClick={this.handleSelectionEmotionClick}
+                        >
+                            Add emotion
+                        </div>
+                    </>
+                )}
+
+                {/* Emoji-only emotion picker */}
                 {showEmotionPicker && emotionPickerTarget && (
                     <>
                         <div
-                            style={{
-                                position: 'fixed', inset: 0, zIndex: 199,
-                                background: 'transparent',
-                            }}
+                            style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'transparent' }}
                             onClick={this.handleCloseEmotionPicker}
                         />
-                        <EmotionPicker
-                            position={emotionPickerPosition}
-                            onSelect={this.handleEmotionSelect}
-                            onClose={this.handleCloseEmotionPicker}
-                            currentEmotion={
-                                this.getMods(emotionPickerTarget.convKey)
-                                    .emotions[emotionPickerTarget.wordIndex]
-                            }
+                        <div
+                            className="emoji-picker"
+                            style={{
+                                position: 'fixed',
+                                top: emotionPickerPosition.top,
+                                left: emotionPickerPosition.left,
+                            }}
+                        >
+                            {Object.entries(EMOTION_EMOJIS).map(([type, emoji]) => (
+                                <button
+                                    key={type}
+                                    className="emoji-picker-item"
+                                    onClick={() => this.handleEmotionSelect({ type, intensity: 0.7 })}
+                                    title={type}
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                            <button
+                                className="emoji-picker-item emoji-picker-remove"
+                                onClick={() => this.handleEmotionSelect(null)}
+                                title="Remove emotion"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </>
+                )}
+
+                {/* Right-click sounds menu */}
+                {this.state.soundsMenu && (
+                    <>
+                        <div
+                            style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                            onClick={() => this.setState({ soundsMenu: null })}
+                            onContextMenu={(e) => { e.preventDefault(); this.setState({ soundsMenu: null }); }}
                         />
+                        <div
+                            className="sounds-menu"
+                            style={{
+                                position: 'fixed',
+                                top: this.state.soundsMenu.top,
+                                left: this.state.soundsMenu.left,
+                            }}
+                        >
+                            <div className="sounds-menu-label">Add sound</div>
+                            <div className="sounds-menu-grid">
+                                {SOUNDS.map(s => (
+                                    <button
+                                        key={s.tag}
+                                        className="sounds-menu-item"
+                                        onClick={() => this.handleSoundSelect(s.tag)}
+                                        title={s.tag}
+                                    >
+                                        {s.emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </>
                 )}
 
