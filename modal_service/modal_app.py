@@ -342,8 +342,9 @@ class TranscribeService:
     gpu="A10G",
     timeout=300,
     volumes={MODEL_CACHE_DIR: model_volume},
+    secrets=[modal.Secret.from_name("wavecraft-secrets")],
     scaledown_window=600,
-    concurrency_limit=4,
+    max_containers=4,
 )
 class TTSService:
     @modal.enter()
