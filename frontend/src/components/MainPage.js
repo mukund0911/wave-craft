@@ -99,6 +99,10 @@ class MainPage extends Component {
         this._generationMsgInterval = null;
         this._toastTimeout = null;
 
+        // Undo/redo history
+        this._undoStack = [];
+        this._redoStack = [];
+        this._maxHistory = 50;
     }
 
     componentDidMount() {
@@ -121,11 +125,19 @@ class MainPage extends Component {
                     this.handleCloseEmotionPicker();
                 } else if (this.state.soundsMenu) {
                     this.setState({ soundsMenu: null });
-                } else if (this.state.selectionTooltip) {
-                    this.setState({ selectionTooltip: null });
                 } else if (this.state.insertMode) {
                     this.setState({ insertMode: null, insertText: '' });
                 }
+            }
+            // Undo: Ctrl+Z
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                this.undo();
+            }
+            // Redo: Ctrl+Y or Ctrl+Shift+Z
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                e.preventDefault();
+                this.redo();
             }
         };
         window.addEventListener('keydown', this._keydownHandler);
@@ -212,6 +224,9 @@ class MainPage extends Component {
     }
 
     setMods(convKey, mods) {
+        // Push current state to undo stack before changing
+        this._pushUndo();
+        this._redoStack = [];
         this.setState(prev => ({
             modifications: {
                 ...prev.modifications,
@@ -219,6 +234,54 @@ class MainPage extends Component {
             }
         }));
     }
+
+    _pushUndo() {
+        // Deep-clone modifications for undo (convert Sets to arrays for cloning)
+        const snapshot = {};
+        for (const [key, mods] of Object.entries(this.state.modifications)) {
+            snapshot[key] = {
+                ...mods,
+                deletedWords: new Set(mods.deletedWords || []),
+                insertedWords: [...(mods.insertedWords || [])],
+                emotion: mods.emotion ? { ...mods.emotion } : null,
+            };
+        }
+        this._undoStack.push(snapshot);
+        if (this._undoStack.length > this._maxHistory) this._undoStack.shift();
+    }
+
+    undo = () => {
+        if (this._undoStack.length === 0) return;
+        // Push current to redo
+        const currentSnapshot = {};
+        for (const [key, mods] of Object.entries(this.state.modifications)) {
+            currentSnapshot[key] = {
+                ...mods,
+                deletedWords: new Set(mods.deletedWords || []),
+                insertedWords: [...(mods.insertedWords || [])],
+                emotion: mods.emotion ? { ...mods.emotion } : null,
+            };
+        }
+        this._redoStack.push(currentSnapshot);
+        const prev = this._undoStack.pop();
+        this.setState({ modifications: prev });
+    };
+
+    redo = () => {
+        if (this._redoStack.length === 0) return;
+        const currentSnapshot = {};
+        for (const [key, mods] of Object.entries(this.state.modifications)) {
+            currentSnapshot[key] = {
+                ...mods,
+                deletedWords: new Set(mods.deletedWords || []),
+                insertedWords: [...(mods.insertedWords || [])],
+                emotion: mods.emotion ? { ...mods.emotion } : null,
+            };
+        }
+        this._undoStack.push(currentSnapshot);
+        const next = this._redoStack.pop();
+        this.setState({ modifications: next });
+    };
 
     // ──────────────────────────────────────────────────
     // Word interactions
@@ -291,7 +354,6 @@ class MainPage extends Component {
 
         this.setState({
             soundsMenu: { top, left, convKey, afterWordIndex: wordIndex },
-            selectionTooltip: null,
         });
     };
 
@@ -541,13 +603,47 @@ class MainPage extends Component {
             if (err.name === 'CanceledError' || err.name === 'AbortError') return;
             console.error('Generation error:', err);
             this.setState({ isGenerating: false, generationMessage: '' });
-            this.showToast(err.response?.data?.error || 'Failed to generate audio. Please try again.');
+            const status = err.response?.status;
+            const serverError = err.response?.data?.error || '';
+            let msg = 'Failed to generate audio. Please try again.';
+            if (status === 503 || status === 502) {
+                msg = 'GPU is warming up. Please wait a moment and try again.';
+            } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+                msg = 'Request timed out. The GPU may be starting up — try again in 30 seconds.';
+            } else if (serverError) {
+                msg = serverError;
+            }
+            this.showToast(msg);
         }
     };
 
     // ──────────────────────────────────────────────────
     // Download (non-blocking)
     // ──────────────────────────────────────────────────
+
+    handleExportSRT = () => {
+        const { conversations } = this.state;
+        if (!conversations.length) return;
+
+        const lines = [];
+        conversations.forEach((convItem, idx) => {
+            const { data } = this.getConvData(convItem);
+            const start = data.original?.start || 0;
+            const end = data.original?.end || 0;
+            lines.push(`${idx + 1}`);
+            lines.push(`${formatSRTTime(start)} --> ${formatSRTTime(end)}`);
+            lines.push(`[Speaker ${data.speaker}] ${data.original.text.trim()}`);
+            lines.push('');
+        });
+
+        const blob = new Blob([lines.join('\n')], { type: 'text/srt' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'wavecraft_transcript.srt';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
     handleDownload = async () => {
         const { generatedAudio } = this.state;
@@ -781,7 +877,14 @@ class MainPage extends Component {
                             <span>Right-click to add sounds</span>
                             <span className="instruction-dot"></span>
                             <span>Double-click to insert</span>
+                            <span className="instruction-dot"></span>
+                            <span>Ctrl+Z to undo</span>
                         </p>
+                        <div className="page-header-actions">
+                            <button className="header-action-btn" onClick={this.handleExportSRT} title="Export transcript as SRT subtitles">
+                                Export SRT
+                            </button>
+                        </div>
                     </div>
                 )}
 
@@ -957,41 +1060,63 @@ class MainPage extends Component {
                     </div>
                 )}
 
-                {/* Emoji-only emotion picker */}
-                {showEmotionPicker && emotionPickerTarget && (
-                    <>
-                        <div
-                            style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'transparent' }}
-                            onClick={this.handleCloseEmotionPicker}
-                        />
-                        <div
-                            className="emoji-picker"
-                            style={{
-                                position: 'fixed',
-                                top: emotionPickerPosition.top,
-                                left: emotionPickerPosition.left,
-                            }}
-                        >
-                            {Object.entries(EMOTION_EMOJIS).map(([type, emoji]) => (
-                                <button
-                                    key={type}
-                                    className="emoji-picker-item"
-                                    onClick={() => this.handleEmotionSelect({ type, intensity: 0.7 })}
-                                    title={type}
-                                >
-                                    {emoji}
-                                </button>
-                            ))}
-                            <button
-                                className="emoji-picker-item emoji-picker-remove"
-                                onClick={() => this.handleEmotionSelect(null)}
-                                title="Remove emotion"
+                {/* Emoji emotion picker with intensity slider */}
+                {showEmotionPicker && emotionPickerTarget && (() => {
+                    const targetMods = this.getMods(emotionPickerTarget.convKey);
+                    const currentEmotion = targetMods.emotion;
+                    return (
+                        <>
+                            <div
+                                style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'transparent' }}
+                                onClick={this.handleCloseEmotionPicker}
+                            />
+                            <div
+                                className="emoji-picker"
+                                style={{
+                                    position: 'fixed',
+                                    top: emotionPickerPosition.top,
+                                    left: emotionPickerPosition.left,
+                                }}
                             >
-                                ✕
-                            </button>
-                        </div>
-                    </>
-                )}
+                                {Object.entries(EMOTION_EMOJIS).map(([type, emoji]) => (
+                                    <button
+                                        key={type}
+                                        className={`emoji-picker-item${currentEmotion?.type === type ? ' selected' : ''}`}
+                                        onClick={() => this.handleEmotionSelect({ type, intensity: currentEmotion?.type === type ? (currentEmotion.intensity || 0.7) : 0.7 })}
+                                        title={type}
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                                <button
+                                    className="emoji-picker-item emoji-picker-remove"
+                                    onClick={() => this.handleEmotionSelect(null)}
+                                    title="Remove emotion"
+                                >
+                                    ✕
+                                </button>
+                                {currentEmotion && (
+                                    <div className="emotion-intensity-row">
+                                        <span className="intensity-label">Intensity</span>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="1.0"
+                                            step="0.1"
+                                            value={currentEmotion.intensity || 0.7}
+                                            onChange={(e) => {
+                                                const intensity = parseFloat(e.target.value);
+                                                this.handleEmotionSelect({ type: currentEmotion.type, intensity });
+                                            }}
+                                            className="intensity-slider"
+                                        />
+                                        <span className="intensity-value">{Math.round((currentEmotion.intensity || 0.7) * 100)}%</span>
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    );
+                })()}
 
                 {/* Right-click sounds menu */}
                 {this.state.soundsMenu && (
@@ -1046,6 +1171,16 @@ function formatTime(seconds) {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Helper: format seconds to SRT time (HH:MM:SS,mmm)
+function formatSRTTime(seconds) {
+    if (seconds == null) return '00:00:00,000';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.round((seconds % 1) * 1000);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
 }
 
 // Wrapper to pass location via hook (for navigation state)
