@@ -14,6 +14,7 @@ import asyncio
 import tempfile
 from io import BytesIO
 from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .base_agent import MCPAgent
 from .whisperx_agent import WhisperXAgent
 from .chatterbox_agent import ChatterboxAgent
@@ -154,17 +155,25 @@ class SpeechProcessingAgent(MCPAgent):
             return self.create_response(False, error="No conversations provided")
 
         try:
-            # Process each segment
-            processed_segments = []
-
+            # Flatten conversations into ordered list
+            tasks = []
             for conv_item in conversations:
-                # Extract the conversation data (might be nested)
                 if isinstance(conv_item, dict):
                     for key, conv in conv_item.items():
-                        result = await self._process_single_segment(conv)
-                        processed_segments.append(result)
-                else:
-                    continue
+                        tasks.append(conv)
+
+            # Process segments in parallel (chatterbox calls are blocking HTTP)
+            max_workers = min(len(tasks), 6)
+            processed_segments = [None] * len(tasks)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(self._process_single_segment, conv): idx
+                    for idx, conv in enumerate(tasks)
+                }
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    processed_segments[idx] = future.result()
 
             # Assemble final audio
             final_audio_b64 = self._assemble_audio(processed_segments)
@@ -182,7 +191,7 @@ class SpeechProcessingAgent(MCPAgent):
             logger.error(f"Modification processing failed: {e}", exc_info=True)
             return self.create_response(False, error=str(e))
 
-    async def _process_single_segment(self, conv: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_single_segment(self, conv: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a single conversation segment.
 

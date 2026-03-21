@@ -58,10 +58,15 @@ def _load_chatterbox(device: str):
         return _chatterbox_model
 
     logger.info("Loading Chatterbox TTS model...")
-    from chatterbox.tts import ChatterboxTTS
-
-    _chatterbox_model = ChatterboxTTS.from_pretrained(device=device)
-    logger.info(f"✓ Chatterbox loaded on {device}")
+    try:
+        from chatterbox.tts_turbo import ChatterboxTurboTTS
+        _chatterbox_model = ChatterboxTurboTTS.from_pretrained(device=device)
+        logger.info(f"✓ Chatterbox Turbo loaded on {device}")
+    except (ImportError, Exception) as e:
+        logger.warning(f"Turbo unavailable ({e}), falling back to base model")
+        from chatterbox.tts import ChatterboxTTS
+        _chatterbox_model = ChatterboxTTS.from_pretrained(device=device)
+        logger.info(f"✓ Chatterbox base loaded on {device}")
     return _chatterbox_model
 
 
@@ -71,9 +76,10 @@ EMOTION_TYPES = {
     "fearful", "surprised", "neutral"
 }
 
-# Paralinguistic tags that Chatterbox supports natively
+# Paralinguistic tags supported by Chatterbox Turbo
 PARALINGUISTIC_TAGS = {
-    "[laugh]", "[sigh]", "[gasp]", "[cough]", "[chuckle]"
+    "[laugh]", "[chuckle]", "[cough]", "[sigh]", "[gasp]",
+    "[groan]", "[sniff]", "[clear throat]", "[shush]"
 }
 
 
@@ -159,13 +165,27 @@ class ChatterboxAgent(MCPAgent):
 
             processed_text = self._apply_emotion_tags(modified_text, emotions)
 
+            # Map emotion intensity to exaggeration (0-1 intensity → 0-2 exaggeration)
+            effective_exaggeration = float(exaggeration)
+            for emotion in emotions:
+                if emotion.get("type") in EMOTION_TYPES:
+                    effective_exaggeration = emotion.get("intensity", 0.5) * 2.0
+                    break
+            effective_exaggeration = max(0.0, min(2.0, effective_exaggeration))
+
+            # Lower cfg_weight when exaggeration is high to prevent speech racing
+            cfg_weight = 0.5
+            if effective_exaggeration > 0.7:
+                cfg_weight = max(0.1, 0.5 - (effective_exaggeration - 0.7) * 0.3)
+
             payload = {
                 "text": processed_text,
                 "reference_audio": reference_audio_b64,
-                "exaggeration": max(0.0, min(1.0, float(exaggeration))),
+                "exaggeration": effective_exaggeration,
+                "cfg_weight": cfg_weight,
             }
 
-            logger.info(f"Sending TTS to Modal: '{processed_text[:60]}...'")
+            logger.info(f"Sending TTS to Modal: '{processed_text[:60]}...' exag={effective_exaggeration:.2f} cfg={cfg_weight:.2f}")
             response = _request_with_retry(
                 MODAL_TTS_URL,
                 payload,
@@ -231,19 +251,30 @@ class ChatterboxAgent(MCPAgent):
             ref_audio_path = self._save_temp_audio(reference_audio_b64)
 
             try:
-                # Clamp exaggeration to valid range
-                exaggeration = max(0.0, min(1.0, float(exaggeration)))
+                # Map emotion intensity to exaggeration
+                effective_exaggeration = float(exaggeration)
+                for emotion in emotions:
+                    if emotion.get("type") in EMOTION_TYPES:
+                        effective_exaggeration = emotion.get("intensity", 0.5) * 2.0
+                        break
+                effective_exaggeration = max(0.0, min(2.0, effective_exaggeration))
+
+                # Lower cfg_weight when exaggeration is high
+                cfg_weight = 0.5
+                if effective_exaggeration > 0.7:
+                    cfg_weight = max(0.1, 0.5 - (effective_exaggeration - 0.7) * 0.3)
 
                 logger.info(f"Generating speech:")
                 logger.info(f"  Text: '{processed_text[:80]}...'")
-                logger.info(f"  Exaggeration: {exaggeration}")
+                logger.info(f"  Exaggeration: {effective_exaggeration:.2f}, cfg_weight: {cfg_weight:.2f}")
                 logger.info(f"  Text changed: {text_changed}")
 
                 # Generate with Chatterbox
                 wav = self._model.generate(
                     text=processed_text,
                     audio_prompt_path=ref_audio_path,
-                    exaggeration=exaggeration,
+                    exaggeration=effective_exaggeration,
+                    cfg_weight=cfg_weight,
                 )
 
                 # Convert to base64

@@ -342,19 +342,28 @@ class TranscribeService:
     gpu="A10G",
     timeout=300,
     volumes={MODEL_CACHE_DIR: model_volume},
-    scaledown_window=120,
+    scaledown_window=300,
+    concurrency_limit=4,
 )
 class TTSService:
     @modal.enter()
     def setup(self):
-        """Load Chatterbox model on container start."""
+        """Load Chatterbox Turbo model on container start."""
         import torch
         from chatterbox.tts import ChatterboxTTS
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Chatterbox on {self.device}...")
-        self.model = ChatterboxTTS.from_pretrained(self.device)
-        logger.info("✓ Chatterbox loaded")
+        logger.info(f"Loading Chatterbox Turbo on {self.device}...")
+
+        # Try Turbo first, fall back to base if unavailable
+        try:
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+            self.model = ChatterboxTurboTTS.from_pretrained(self.device)
+            logger.info("✓ Chatterbox Turbo loaded")
+        except (ImportError, Exception) as e:
+            logger.warning(f"Turbo unavailable ({e}), falling back to base model")
+            self.model = ChatterboxTTS.from_pretrained(self.device)
+            logger.info("✓ Chatterbox base loaded")
 
         self.torch = torch
         model_volume.commit()
@@ -368,7 +377,8 @@ class TTSService:
         try:
             text = request.get("text", "")
             reference_audio_b64 = request.get("reference_audio", "")
-            exaggeration = request.get("exaggeration", 0.5)
+            exaggeration = max(0.0, min(2.0, float(request.get("exaggeration", 0.5))))
+            cfg_weight = max(0.0, min(1.0, float(request.get("cfg_weight", 0.5))))
 
             if not text:
                 return {"status": "error", "error": "No text provided"}
@@ -386,6 +396,7 @@ class TTSService:
                 text,
                 audio_prompt_path=ref_path,
                 exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
             )
 
             # Convert tensor to base64 WAV

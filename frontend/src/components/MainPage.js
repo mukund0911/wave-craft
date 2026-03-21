@@ -22,10 +22,13 @@ const EMOTION_EMOJIS = {
 
 const SOUNDS = [
     { tag: '[laugh]', emoji: '😂' },
+    { tag: '[chuckle]', emoji: '🤭' },
     { tag: '[sigh]', emoji: '😮‍💨' },
     { tag: '[gasp]', emoji: '😱' },
     { tag: '[cough]', emoji: '🤧' },
-    { tag: '[chuckle]', emoji: '🤭' },
+    { tag: '[groan]', emoji: '😩' },
+    { tag: '[sniff]', emoji: '🤧' },
+    { tag: '[shush]', emoji: '🤫' },
 ];
 
 /**
@@ -540,6 +543,13 @@ class MainPage extends Component {
                 const modifiedText = this.buildModifiedText(data.original.text, mods);
                 const emotions = this.buildEmotionsList(mods);
 
+                // Derive exaggeration from highest emotion intensity
+                const toneEmotions = emotions.filter(e => !e.type.startsWith('['));
+                const maxIntensity = toneEmotions.reduce((max, e) => Math.max(max, e.intensity), 0);
+                const exaggeration = maxIntensity > 0
+                    ? maxIntensity * 2.0
+                    : (mods.exaggeration || 0.5);
+
                 return {
                     [key]: {
                         speaker: data.speaker,
@@ -547,7 +557,7 @@ class MainPage extends Component {
                         modified: {
                             text: modifiedText,
                             emotions: emotions,
-                            exaggeration: mods.exaggeration || 0.5,
+                            exaggeration: exaggeration,
                         }
                     }
                 };
