@@ -237,18 +237,16 @@
   width: 24px;
   height: 24px;
   cursor: grab;
-  opacity: 0.3;
   transition: opacity 0.2s, background 0.2s;
   border-radius: 4px;
   flex-shrink: 0;
-  color: rgba(0, 0, 0, 0.35);
+  color: rgba(0, 0, 0, 0.55);
   margin-right: 4px;
 }
 
 .drag-handle:hover {
-  opacity: 1;
-  color: rgba(0, 0, 0, 0.6);
-  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .drag-handle:active {

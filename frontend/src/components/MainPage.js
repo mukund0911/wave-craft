@@ -171,9 +171,13 @@ class MainPage extends Component {
             }
         }
 
+        // Store original conversation key order for reorder detection
+        this._originalOrder = conversations.map(c => Object.keys(c)[0]);
+
         this.state = {
             conversations,
             fullAudio,
+            isReordered: false,
             modifications: {}, // { convKey: { deletedWords: Set, insertedWords: [], emotion: null, exaggeration: 0.5 } }
             // Speaker-click emotion
             showEmotionPicker: false,
@@ -338,8 +342,7 @@ class MainPage extends Component {
         }));
     }
 
-    _pushUndo() {
-        // Deep-clone modifications for undo (convert Sets to arrays for cloning)
+    _cloneModifications() {
         const snapshot = {};
         for (const [key, mods] of Object.entries(this.state.modifications)) {
             snapshot[key] = {
@@ -349,41 +352,46 @@ class MainPage extends Component {
                 emotion: mods.emotion ? { ...mods.emotion } : null,
             };
         }
-        this._undoStack.push(snapshot);
+        return snapshot;
+    }
+
+    _pushUndo() {
+        this._undoStack.push({
+            modifications: this._cloneModifications(),
+            conversations: [...this.state.conversations],
+            isReordered: this.state.isReordered,
+        });
         if (this._undoStack.length > this._maxHistory) this._undoStack.shift();
     }
 
     undo = () => {
         if (this._undoStack.length === 0) return;
-        // Push current to redo
-        const currentSnapshot = {};
-        for (const [key, mods] of Object.entries(this.state.modifications)) {
-            currentSnapshot[key] = {
-                ...mods,
-                deletedWords: new Set(mods.deletedWords || []),
-                insertedWords: [...(mods.insertedWords || [])],
-                emotion: mods.emotion ? { ...mods.emotion } : null,
-            };
-        }
-        this._redoStack.push(currentSnapshot);
+        this._redoStack.push({
+            modifications: this._cloneModifications(),
+            conversations: [...this.state.conversations],
+            isReordered: this.state.isReordered,
+        });
         const prev = this._undoStack.pop();
-        this.setState({ modifications: prev });
+        this.setState({
+            modifications: prev.modifications,
+            conversations: prev.conversations,
+            isReordered: prev.isReordered,
+        });
     };
 
     redo = () => {
         if (this._redoStack.length === 0) return;
-        const currentSnapshot = {};
-        for (const [key, mods] of Object.entries(this.state.modifications)) {
-            currentSnapshot[key] = {
-                ...mods,
-                deletedWords: new Set(mods.deletedWords || []),
-                insertedWords: [...(mods.insertedWords || [])],
-                emotion: mods.emotion ? { ...mods.emotion } : null,
-            };
-        }
-        this._undoStack.push(currentSnapshot);
+        this._undoStack.push({
+            modifications: this._cloneModifications(),
+            conversations: [...this.state.conversations],
+            isReordered: this.state.isReordered,
+        });
         const next = this._redoStack.pop();
-        this.setState({ modifications: next });
+        this.setState({
+            modifications: next.modifications,
+            conversations: next.conversations,
+            isReordered: next.isReordered,
+        });
     };
 
     // ──────────────────────────────────────────────────
@@ -391,9 +399,13 @@ class MainPage extends Component {
     // ──────────────────────────────────────────────────
 
     handleReorder = (oldIndex, newIndex) => {
-        this.setState(prev => ({
-            conversations: arrayMove(prev.conversations, oldIndex, newIndex),
-        }));
+        this._pushUndo();
+        this.setState(prev => {
+            const reordered = arrayMove(prev.conversations, oldIndex, newIndex);
+            const currentOrder = reordered.map(c => Object.keys(c)[0]);
+            const isReordered = JSON.stringify(currentOrder) !== JSON.stringify(this._originalOrder);
+            return { conversations: reordered, isReordered };
+        });
     };
 
     // ──────────────────────────────────────────────────
@@ -627,7 +639,7 @@ class MainPage extends Component {
 
         // Guard: no edits
         const stats = this.getEditStats();
-        if (stats.deleted === 0 && stats.inserted === 0 && stats.emotions === 0) return;
+        if (stats.deleted === 0 && stats.inserted === 0 && stats.emotions === 0 && !this.state.isReordered) return;
 
         this._abortController = new AbortController();
 
@@ -972,7 +984,7 @@ class MainPage extends Component {
         } = this.state;
 
         const stats = this.getEditStats();
-        const hasEdits = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0;
+        const hasEdits = stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0 || this.state.isReordered;
 
         return (
             <div className="main-page">
