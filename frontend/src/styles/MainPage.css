@@ -241,13 +241,14 @@
   transition: opacity 0.2s, background 0.2s;
   border-radius: 4px;
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 0, 0, 0.35);
   margin-right: 4px;
 }
 
 .drag-handle:hover {
-  opacity: 0.8;
-  background: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .drag-handle:active {
