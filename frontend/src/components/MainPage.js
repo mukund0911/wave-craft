@@ -96,8 +96,8 @@ function SortableSegment({ id, children }) {
     };
 
     return (
-        <div ref={setNodeRef} style={style} {...attributes}>
-            <div className="drag-handle" {...listeners} title="Drag to reorder">
+        <div ref={setNodeRef} style={style}>
+            <div className="drag-handle" {...attributes} {...listeners} title="Drag to reorder">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="rgba(0,0,0,0.2)">
                     <circle cx="3" cy="2" r="1.2"/><circle cx="9" cy="2" r="1.2"/>
                     <circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/>
