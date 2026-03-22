@@ -231,27 +231,28 @@
 
 /* ─── Drag Handle ─── */
 .drag-handle {
-  position: absolute;
-  left: -28px;
-  top: 14px;
-  width: 20px;
-  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
   cursor: grab;
-  opacity: 0;
-  transition: opacity 0.2s;
+  opacity: 0.3;
+  transition: opacity 0.2s, background 0.2s;
   border-radius: 4px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.6);
+  margin-right: 4px;
+}
+
+.drag-handle:hover {
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .drag-handle:active {
   cursor: grabbing;
-}
-
-.speaker-section:hover .drag-handle,
-.drag-handle:focus-visible {
-  opacity: 1;
+  opacity: 0.8;
 }
 
 /* ─── Transcript Actions ─── */

@@ -97,14 +97,7 @@ function SortableSegment({ id, children }) {
 
     return (
         <div ref={setNodeRef} style={style}>
-            <div className="drag-handle" {...attributes} {...listeners} title="Drag to reorder">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="rgba(0,0,0,0.2)">
-                    <circle cx="3" cy="2" r="1.2"/><circle cx="9" cy="2" r="1.2"/>
-                    <circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/>
-                    <circle cx="3" cy="10" r="1.2"/><circle cx="9" cy="10" r="1.2"/>
-                </svg>
-            </div>
-            {children}
+            {typeof children === 'function' ? children({ attributes, listeners }) : children}
         </div>
     );
 }
@@ -1042,11 +1035,19 @@ class MainPage extends Component {
 
                                 return (
                                     <SortableSegment key={key} id={key}>
+                                        {({ attributes, listeners }) => (
                                         <div
                                             className="speaker-section"
                                             style={{ animationDelay: `${idx * 0.05}s` }}
                                         >
                                             <div className="speaker-header" onClick={(e) => this.handleSpeakerClick(e, key)}>
+                                                <div className="drag-handle" {...attributes} {...listeners} title="Drag to reorder" onClick={(e) => e.stopPropagation()}>
+                                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                                        <circle cx="3" cy="2" r="1.2"/><circle cx="9" cy="2" r="1.2"/>
+                                                        <circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/>
+                                                        <circle cx="3" cy="10" r="1.2"/><circle cx="9" cy="10" r="1.2"/>
+                                                    </svg>
+                                                </div>
                                                 <div className={`speaker-avatar ${this.getSpeakerClass(data.speaker)}`}>
                                                     {data.speaker}
                                                 </div>
@@ -1089,6 +1090,7 @@ class MainPage extends Component {
                                                 )}
                                             </div>
                                         </div>
+                                        )}
                                     </SortableSegment>
                                 );
                             })}
