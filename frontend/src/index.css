@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Great+Vibes&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* ─── Global Reset — Monochrome ─── */
 :root {
@@ -7,9 +7,9 @@
   --text-primary: #0a0a0a;
   --text-secondary: #555555;
   --text-muted: #999999;
-  --accent: #000000;
+  --accent: #0BDA51;
   --border: rgba(0, 0, 0, 0.08);
-  --font-logo: 'Pacifico', cursive;
+  --font-logo: 'Great Vibes', cursive;
   --font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }

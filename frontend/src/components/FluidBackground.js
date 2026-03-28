@@ -43,11 +43,11 @@ const CONFIG = {
         rotationJitter: 0.2,
         cursorFollowStrength: 1,
         oscillationFactor: 1,
-        // Monochrome — all black
+        // Green accent palette
         colorBase: '#ffffff',
-        colorOne: '#000000',
-        colorTwo: '#1a1a1a',
-        colorThree: '#0d0d0d',
+        colorOne: '#0BDA51',
+        colorTwo: '#09B845',
+        colorThree: '#07E04E',
     },
     background: {
         color: '#ffffff',
@@ -179,9 +179,9 @@ const fragmentShader = `
         vec2 center = vec2(0.5);
         vec2 pos = abs(vUv - center) * 2.0;
 
-        // Pixelated square shape — hard edges
-        float d = max(pos.x, pos.y);
-        float alpha = 1.0 - step(0.92, d);
+        // Soft rounded circle
+        float d = length(pos);
+        float alpha = 1.0 - smoothstep(0.85, 1.0, d);
         if (alpha < 0.01) discard;
 
         vec3 base = uParticleColorBase;
