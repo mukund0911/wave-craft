@@ -337,7 +337,10 @@ class WhisperXAgent(MCPAgent):
             speaker_id = segment.get("speaker", "SPEAKER_00")
 
             if speaker_id not in speaker_map:
-                speaker_map[speaker_id] = chr(ord('A') + speaker_counter)
+                if speaker_counter < 26:
+                    speaker_map[speaker_id] = chr(ord('A') + speaker_counter)
+                else:
+                    speaker_map[speaker_id] = f"Speaker {speaker_counter + 1}"
                 speaker_counter += 1
 
             speaker_label = speaker_map[speaker_id]

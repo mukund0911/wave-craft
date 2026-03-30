@@ -1,6 +1,6 @@
 """
 WaveCraft Modal GPU Service
-Hosts WhisperX (transcription + diarization) and Chatterbox (TTS/voice cloning)
+Hosts faster-whisper (transcription) + pyannote (diarization) and Chatterbox (TTS/voice cloning)
 on A10G GPU as serverless endpoints.
 
 Deploy: modal deploy modal_service/modal_app.py
@@ -105,11 +105,12 @@ class TranscribeService:
         )
         logger.info("✓ WhisperX model loaded")
 
-        # Load alignment model
+        # Load default alignment model (English); others loaded on demand
         self.align_model, self.align_metadata = whisperx.load_align_model(
             language_code="en", device=self.device
         )
-        logger.info("✓ Alignment model loaded")
+        self._align_cache = {"en": (self.align_model, self.align_metadata)}
+        logger.info("✓ Alignment model loaded (en)")
 
         # Load diarization pipeline
         hf_token = os.environ.get("HF_TOKEN", "")
@@ -131,6 +132,7 @@ class TranscribeService:
         import torch
         from pydub import AudioSegment
 
+        audio_path = None
         try:
             audio_b64 = request.get("audio")
             num_speakers = request.get("num_speakers")
@@ -149,15 +151,22 @@ class TranscribeService:
             result = self.model.transcribe(audio, batch_size=16)
             language = result.get("language", "en")
 
-            # Step 2: Align words
+            # Free transcription model GPU memory before alignment
+            torch.cuda.empty_cache()
+
+            # Step 2: Align words (load language-specific model if needed)
+            align_model, align_metadata = self._get_align_model(language)
             result = self.whisperx.align(
                 result["segments"],
-                self.align_model,
-                self.align_metadata,
+                align_model,
+                align_metadata,
                 audio,
                 self.device,
                 return_char_alignments=False,
             )
+
+            # Free alignment GPU memory before diarization
+            torch.cuda.empty_cache()
 
             # Step 3: Diarize speakers
             if self.diarize_pipeline is not None:
@@ -185,14 +194,13 @@ class TranscribeService:
                 for segment in result["segments"]:
                     segment["speaker"] = "SPEAKER_00"
 
+            torch.cuda.empty_cache()
+
             # Step 4: Build conversation structure
             conversations = self._build_conversations(result, audio_path)
 
             # Step 5: Full audio base64
             full_audio_b64 = self._audio_to_base64(audio_path)
-
-            # Cleanup
-            os.unlink(audio_path)
 
             return {
                 "status": "completed",
@@ -204,6 +212,9 @@ class TranscribeService:
         except Exception as e:
             logger.error(f"Transcription failed: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                os.unlink(audio_path)
 
     def _build_conversations(self, result, audio_path):
         from pydub import AudioSegment
@@ -216,7 +227,10 @@ class TranscribeService:
         for segment in result.get("segments", []):
             speaker_id = segment.get("speaker", "SPEAKER_00")
             if speaker_id not in speaker_map:
-                speaker_map[speaker_id] = chr(ord("A") + speaker_counter)
+                if speaker_counter < 26:
+                    speaker_map[speaker_id] = chr(ord("A") + speaker_counter)
+                else:
+                    speaker_map[speaker_id] = f"Speaker {speaker_counter + 1}"
                 speaker_counter += 1
 
             speaker_label = speaker_map[speaker_id]
@@ -326,6 +340,21 @@ class TranscribeService:
 
         return result
 
+    def _get_align_model(self, language_code):
+        """Get alignment model for language, loading on demand and caching."""
+        if language_code in self._align_cache:
+            return self._align_cache[language_code]
+        try:
+            model, metadata = self.whisperx.load_align_model(
+                language_code=language_code, device=self.device
+            )
+            self._align_cache[language_code] = (model, metadata)
+            logger.info(f"✓ Alignment model loaded ({language_code})")
+            return model, metadata
+        except Exception as e:
+            logger.warning(f"No alignment model for '{language_code}', falling back to English: {e}")
+            return self._align_cache["en"]
+
     def _audio_to_base64(self, audio_path):
         from pydub import AudioSegment
 
@@ -393,6 +422,7 @@ class TTSService:
         import torchaudio
         import tempfile
 
+        ref_path = None
         try:
             text = request.get("text", "")
             reference_audio_b64 = request.get("reference_audio", "")
@@ -403,7 +433,6 @@ class TTSService:
                 return {"status": "error", "error": "No text provided"}
 
             # Save reference audio to temp file if provided
-            ref_path = None
             if reference_audio_b64:
                 audio_bytes = base64.b64decode(reference_audio_b64)
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -429,9 +458,7 @@ class TTSService:
             )
             audio_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-            # Cleanup
-            if ref_path:
-                os.unlink(ref_path)
+            self.torch.cuda.empty_cache()
 
             return {
                 "status": "completed",
@@ -442,6 +469,9 @@ class TTSService:
         except Exception as e:
             logger.error(f"TTS failed: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
+        finally:
+            if ref_path and os.path.exists(ref_path):
+                os.unlink(ref_path)
 
     @modal.fastapi_endpoint(method="GET")
     def info(self):

@@ -16,7 +16,6 @@ import os
 import json
 import uuid
 import hashlib
-import asyncio
 import logging
 import base64
 import time
@@ -314,6 +313,8 @@ def modified_transcript():
             full_audio = request.form.get('full_audio', '')
         else:
             data = request.get_json()
+            if not data:
+                return jsonify({"error": "Invalid or missing JSON body"}), 400
             conversations_str = json.dumps(data.get('conversations_updated', []))
             full_audio = data.get('full_audio', '')
 
@@ -339,8 +340,8 @@ def modified_transcript():
             "full_audio": full_audio
         }
 
-        # Run async processing
-        result = asyncio.run(speech_agent.process_request(request_data))
+        # Process modifications synchronously
+        result = speech_agent.handle_modifications(request_data)
 
         if not result.get("success"):
             error_msg = result.get("error", "Processing failed")

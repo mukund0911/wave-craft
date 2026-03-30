@@ -10,7 +10,6 @@ import wave
 import struct
 import base64
 import logging
-import asyncio
 import tempfile
 from io import BytesIO
 from typing import Dict, Any, List, Optional
@@ -62,9 +61,13 @@ class SpeechProcessingAgent(MCPAgent):
         if action == "transcribe":
             return self._handle_transcription(request)
         elif action == "process_modifications":
-            return await self._handle_modifications(request)
+            return self._handle_modifications(request)
         else:
             return self.create_response(False, error=f"Unknown action: {action}")
+
+    def handle_modifications(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Sync entry point for routes.py — avoids unnecessary asyncio.run()."""
+        return self._handle_modifications(request)
 
     # ──────────────────────────────────────────────────
     # Transcription (WhisperX)
@@ -131,7 +134,7 @@ class SpeechProcessingAgent(MCPAgent):
     # Modification Processing (Chatterbox)
     # ──────────────────────────────────────────────────
 
-    async def _handle_modifications(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_modifications(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process modified transcripts and generate new audio.
 
@@ -161,6 +164,9 @@ class SpeechProcessingAgent(MCPAgent):
                 if isinstance(conv_item, dict):
                     for key, conv in conv_item.items():
                         tasks.append(conv)
+
+            if not tasks:
+                return self.create_response(False, error="No valid conversation segments found")
 
             # Process segments in parallel (chatterbox calls are blocking HTTP)
             max_workers = min(len(tasks), 6)

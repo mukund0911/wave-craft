@@ -10,6 +10,7 @@ import base64
 import logging
 import tempfile
 import time
+import threading
 import requests as http_requests
 from io import BytesIO
 from typing import Dict, Any, Optional, List
@@ -116,6 +117,7 @@ class ChatterboxAgent(MCPAgent):
             "failed": 0,
             "total_inference_time": 0.0
         }
+        self._stats_lock = threading.Lock()
 
         logger.info(f"ChatterboxAgent initialized: device={self.device}")
 
@@ -215,7 +217,8 @@ class ChatterboxAgent(MCPAgent):
         """Run Chatterbox locally (dev mode)."""
         import time
 
-        self._stats["total_requests"] += 1
+        with self._stats_lock:
+            self._stats["total_requests"] += 1
         start_time = time.time()
 
         try:
@@ -281,8 +284,9 @@ class ChatterboxAgent(MCPAgent):
                 output_b64 = self._tensor_to_base64(wav)
 
                 inference_time = time.time() - start_time
-                self._stats["successful"] += 1
-                self._stats["total_inference_time"] += inference_time
+                with self._stats_lock:
+                    self._stats["successful"] += 1
+                    self._stats["total_inference_time"] += inference_time
 
                 logger.info(f"✓ Generated in {inference_time:.2f}s")
 
@@ -301,7 +305,8 @@ class ChatterboxAgent(MCPAgent):
                     os.remove(ref_audio_path)
 
         except Exception as e:
-            self._stats["failed"] += 1
+            with self._stats_lock:
+                self._stats["failed"] += 1
             logger.error(f"Voice cloning failed: {e}", exc_info=True)
 
             # Fallback: return original audio
@@ -323,7 +328,8 @@ class ChatterboxAgent(MCPAgent):
         """
         import time
 
-        self._stats["total_requests"] += 1
+        with self._stats_lock:
+            self._stats["total_requests"] += 1
         start_time = time.time()
 
         try:
@@ -347,7 +353,8 @@ class ChatterboxAgent(MCPAgent):
 
             output_b64 = self._tensor_to_base64(wav)
             inference_time = time.time() - start_time
-            self._stats["successful"] += 1
+            with self._stats_lock:
+                self._stats["successful"] += 1
 
             return self.create_response(True, {
                 "audio_base64": output_b64,
@@ -357,7 +364,8 @@ class ChatterboxAgent(MCPAgent):
             })
 
         except Exception as e:
-            self._stats["failed"] += 1
+            with self._stats_lock:
+                self._stats["failed"] += 1
             logger.error(f"Speech generation failed: {e}", exc_info=True)
             return self.create_response(False, error=f"Failed to generate speech: {str(e)}")
 
@@ -429,13 +437,14 @@ class ChatterboxAgent(MCPAgent):
 
     def get_stats(self) -> Dict[str, Any]:
         """Get performance statistics"""
-        total = self._stats["total_requests"]
-        return {
-            **self._stats,
-            "success_rate": (self._stats["successful"] / total * 100) if total > 0 else 0,
-            "avg_inference_time": (
-                self._stats["total_inference_time"] / self._stats["successful"]
-                if self._stats["successful"] > 0 else 0
-            ),
-            "device": self.device
-        }
+        with self._stats_lock:
+            total = self._stats["total_requests"]
+            return {
+                **self._stats,
+                "success_rate": (self._stats["successful"] / total * 100) if total > 0 else 0,
+                "avg_inference_time": (
+                    self._stats["total_inference_time"] / self._stats["successful"]
+                    if self._stats["successful"] > 0 else 0
+                ),
+                "device": self.device
+            }

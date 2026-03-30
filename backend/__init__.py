@@ -25,17 +25,23 @@ def create_app():
          expose_headers=['Content-Type'],
          max_age=3600)
 
-    # Error handlers with CORS headers
+    # Error handlers with CORS headers (use same restricted origins, not wildcard)
+    def _add_cors_headers(response):
+        from flask import request as req
+        origin = req.headers.get('Origin', '')
+        if origin in ALLOWED_ORIGINS:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+
     @app.errorhandler(503)
     def service_unavailable(e):
         response = jsonify({
             'error': 'Service temporarily unavailable. The server is waking up, please try again in a moment.'
         })
         response.status_code = 503
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
+        return _add_cors_headers(response)
 
     @app.errorhandler(500)
     def internal_error(e):
@@ -43,10 +49,7 @@ def create_app():
             'error': 'Internal server error'
         })
         response.status_code = 500
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
+        return _add_cors_headers(response)
 
     from .routes import main
     app.register_blueprint(main)
