@@ -35,8 +35,8 @@ const CONFIG = {
         scaleY: 1,
     },
     particles: {
-        baseSize: 0.016,
-        activeSize: 0.044,
+        baseSize: 0.0184,
+        activeSize: 0.0506,
         blobScaleX: 1,
         blobScaleY: 0.6,
         rotationSpeed: 0.1,
