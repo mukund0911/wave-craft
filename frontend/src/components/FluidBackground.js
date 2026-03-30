@@ -43,11 +43,11 @@ const CONFIG = {
         rotationJitter: 0.2,
         cursorFollowStrength: 1,
         oscillationFactor: 1,
-        // Green accent palette
-        colorBase: '#ffffff',
-        colorOne: '#0BDA51',
-        colorTwo: '#09B845',
-        colorThree: '#07E04E',
+        // Aurora palette — violet / cyan / coral
+        colorBase: '#f0edff',
+        colorOne: '#7B61FF',
+        colorTwo: '#00D4FF',
+        colorThree: '#FF6B9D',
     },
     background: {
         color: '#ffffff',

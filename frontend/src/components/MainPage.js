@@ -218,7 +218,7 @@ class MainPage extends Component {
         // Unsaved changes warning
         this._beforeUnloadHandler = (e) => {
             const stats = this.getEditStats();
-            if (stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0) {
+            if (stats.deleted > 0 || stats.inserted > 0 || stats.emotions > 0 || this.state.isReordered) {
                 e.preventDefault();
                 e.returnValue = '';
             }
@@ -400,6 +400,7 @@ class MainPage extends Component {
 
     handleReorder = (oldIndex, newIndex) => {
         this._pushUndo();
+        this._redoStack = [];
         this.setState(prev => {
             const reordered = arrayMove(prev.conversations, oldIndex, newIndex);
             const currentOrder = reordered.map(c => Object.keys(c)[0]);
@@ -1049,7 +1050,7 @@ class MainPage extends Component {
                                     <SortableSegment key={key} id={key}>
                                         {({ attributes, listeners }) => (
                                         <div
-                                            className="speaker-section"
+                                            className={`speaker-section ${this.getSpeakerClass(data.speaker)}-section`}
                                             style={{ animationDelay: `${idx * 0.05}s` }}
                                         >
                                             <div className="speaker-header" onClick={(e) => this.handleSpeakerClick(e, key)}>

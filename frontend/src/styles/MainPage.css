@@ -2,7 +2,7 @@
 
 .main-page {
   min-height: 100vh;
-  background: linear-gradient(180deg, #fafafa 0%, #ffffff 40%, #f8f8f8 100%);
+  background: linear-gradient(180deg, #f8f7ff 0%, #ffffff 40%, #faf8ff 100%);
   color: var(--text-primary, #0a0a0a);
   font-family: var(--font-body, 'Inter', -apple-system, sans-serif);
   position: relative;
@@ -49,7 +49,7 @@
   top: 0;
   bottom: 120px;
   width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.06) 10%, rgba(0, 0, 0, 0.06) 90%, transparent);
+  background: linear-gradient(180deg, transparent, rgba(99, 102, 241, 0.12) 10%, rgba(139, 92, 246, 0.12) 50%, rgba(236, 72, 153, 0.12) 90%, transparent);
   pointer-events: none;
 }
 
@@ -106,17 +106,17 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(99, 102, 241, 0.3);
   border: 2px solid #fff;
   z-index: 1;
 }
 
-/* Speaker color system — subtle, muted tones */
-.speaker-avatar.speaker-a { background: #1a1a1a; }
-.speaker-avatar.speaker-b { background: #555555; }
-.speaker-avatar.speaker-c { background: #888888; }
-.speaker-avatar.speaker-d { background: #333333; }
-.speaker-avatar.speaker-e { background: #666666; }
+/* Speaker color system — vibrant aurora tones */
+.speaker-avatar.speaker-a { background: #6366F1; }
+.speaker-avatar.speaker-b { background: #EC4899; }
+.speaker-avatar.speaker-c { background: #F59E0B; }
+.speaker-avatar.speaker-d { background: #10B981; }
+.speaker-avatar.speaker-e { background: #8B5CF6; }
 
 .speaker-name {
   font-family: var(--font-heading, 'Space Grotesk', sans-serif);
@@ -135,10 +135,11 @@
 
 /* ─── Transcript Block — Glassmorphic ─── */
 .transcript-block {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(0, 0, 0, 0.06);
+  border-left: 3px solid transparent;
   border-radius: 16px;
   padding: 20px 24px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -148,15 +149,22 @@
 
 .transcript-block:hover {
   border-color: rgba(0, 0, 0, 0.12);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   transform: translateY(-1px);
 }
 
 .transcript-block.modified {
   border-color: rgba(0, 0, 0, 0.15);
-  background: rgba(255, 249, 229, 0.6);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  background: rgba(99, 102, 241, 0.04);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.08);
 }
+
+/* Speaker-colored left border accents */
+.speaker-a-section .transcript-block { border-left-color: rgba(99, 102, 241, 0.5); }
+.speaker-b-section .transcript-block { border-left-color: rgba(236, 72, 153, 0.5); }
+.speaker-c-section .transcript-block { border-left-color: rgba(245, 158, 11, 0.5); }
+.speaker-d-section .transcript-block { border-left-color: rgba(16, 185, 129, 0.5); }
+.speaker-e-section .transcript-block { border-left-color: rgba(139, 92, 246, 0.5); }
 
 /* ─── Editable Text ─── */
 .transcript-text {
@@ -195,7 +203,7 @@
 
 
 .transcript-text .word.inserted {
-  color: #059669;
+  color: #10B981;
   font-weight: 500;
 }
 
@@ -323,10 +331,10 @@
   left: 0;
   right: 0;
   padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(15, 15, 25, 0.88);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -338,7 +346,7 @@
   align-items: center;
   gap: 16px;
   font-size: 0.82rem;
-  color: var(--text-muted, #999999);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .bottom-bar-stat {
@@ -353,17 +361,17 @@
   border-radius: 50%;
 }
 
-.dot.modified { background: #0BDA51; }
+.dot.modified { background: #6366F1; }
 .dot.deleted { background: #ef4444; }
-.dot.inserted { background: #059669; }
-.dot.emotion { background: #7c3aed; }
+.dot.inserted { background: #10B981; }
+.dot.emotion { background: #EC4899; }
 
 .generate-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 12px 28px;
-  background: #0BDA51;
+  background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 50%, #EC4899 100%);
   color: white;
   font-family: var(--font-body, 'Inter', sans-serif);
   font-size: 0.88rem;
@@ -372,12 +380,19 @@
   border-radius: 100px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease infinite;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .generate-btn:hover {
   transform: translateY(-2px);
-  background: #09B845;
-  box-shadow: 0 8px 24px rgba(11, 218, 81, 0.25);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35);
 }
 
 .generate-btn:disabled {
@@ -397,15 +412,15 @@
 .generation-spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid rgba(0, 0, 0, 0.08);
-  border-top-color: #0BDA51;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-top-color: #8B5CF6;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
 .generation-message {
   font-size: 0.85rem;
-  color: var(--text-secondary, #555555);
+  color: rgba(255, 255, 255, 0.7);
   font-weight: 500;
   animation: messageFade 0.3s ease-out;
 }
@@ -491,7 +506,7 @@
 
 .download-playback-fill {
   height: 100%;
-  background: #0BDA51;
+  background: linear-gradient(90deg, #6366F1, #EC4899);
   border-radius: 2px;
   transition: width 0.3s linear;
 }
@@ -507,7 +522,7 @@
   align-items: center;
   gap: 6px;
   padding: 12px 28px;
-  background: #0BDA51;
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
   color: white;
   font-family: var(--font-body, 'Inter', sans-serif);
   font-size: 0.88rem;
@@ -521,8 +536,7 @@
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  background: #09B845;
-  box-shadow: 0 8px 24px rgba(11, 218, 81, 0.25);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
 }
 
 .btn-secondary {
@@ -801,9 +815,9 @@
 
 /* ─── Insert input ─── */
 .insert-input {
-  background: rgba(5, 150, 105, 0.06) !important;
-  border: 1px solid rgba(5, 150, 105, 0.2) !important;
-  color: #059669 !important;
+  background: rgba(16, 185, 129, 0.06) !important;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+  color: #10B981 !important;
 }
 
 /* ─── Empty State ─── */

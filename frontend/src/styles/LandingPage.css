@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Great+Vibes&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* ─── CSS Custom Properties — Monochrome ─── */
 :root {
@@ -7,10 +7,10 @@
     --text-primary: #0a0a0a;
     --text-secondary: #555555;
     --text-muted: #999999;
-    --accent: #0BDA51;
+    --accent: #6366F1;
     --border: rgba(0, 0, 0, 0.08);
     --border-hover: rgba(0, 0, 0, 0.2);
-    --font-logo: 'Great Vibes', cursive;
+    --font-logo: 'Pacifico', cursive;
     --font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --radius-md: 12px;
@@ -68,7 +68,7 @@ body {
 
 .nav-logo-text {
     font-family: var(--font-logo);
-    font-size: 1.7rem;
+    font-size: 1.5rem;
     color: var(--text-primary);
     letter-spacing: 0.01em;
 }
