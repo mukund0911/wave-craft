@@ -76,7 +76,7 @@ chatterbox_image = (
 @app.cls(
     image=whisperx_image,
     gpu="A10G",
-    timeout=600,
+    timeout=1800,
     volumes={MODEL_CACHE_DIR: model_volume},
     secrets=[modal.Secret.from_name("wavecraft-secrets")],
     scaledown_window=120,

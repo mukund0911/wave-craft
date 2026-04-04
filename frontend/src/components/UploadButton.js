@@ -5,7 +5,7 @@ import '../styles/LandingPage.css';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB
 
 /**
  * Premium Upload Button with drag-and-drop zone and animated progress.
@@ -70,7 +70,7 @@ class UploadButtonClass extends Component {
             return;
         }
         if (file.size > MAX_FILE_SIZE) {
-            this.setState({ error: 'File too large. Maximum size is 50MB.' });
+            this.setState({ error: 'File too large. Maximum size is 200MB.' });
             return;
         }
 
@@ -126,7 +126,7 @@ class UploadButtonClass extends Component {
 
     pollStatus = async (jobId) => {
         let attempts = 0;
-        const maxAttempts = 120;
+        const maxAttempts = 1800;  // 30 min at 1s intervals — handles long podcasts
 
         const poll = async () => {
             if (this._unmounted) return;
@@ -216,7 +216,7 @@ class UploadButtonClass extends Component {
                                     : 'Drop audio file or click to browse'}
                             </div>
                             <div className="upload-subtext">
-                                Supports WAV, MP3, M4A, FLAC, OGG (max 50MB)
+                                Supports WAV, MP3, M4A, FLAC, OGG (max 200MB)
                             </div>
                             <input
                                 type="file"

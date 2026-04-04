@@ -686,16 +686,16 @@ class MainPage extends Component {
             formData.append('conversations_updated', JSON.stringify(conversationsUpdated));
             formData.append('full_audio', this.state.fullAudio);
 
-            // Retry on 503 (Heroku dyno waking up)
-            let response;
+            // Kick off async generation — returns 202 with job_id
+            let startResp;
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    response = await axios.post(
+                    startResp = await axios.post(
                         `${apiUrl}/conversations_modified`,
                         formData,
                         {
                             headers: { 'content-type': 'multipart/form-data' },
-                            timeout: 180000,
+                            timeout: 60000,
                             signal: this._abortController.signal,
                         }
                     );
@@ -711,16 +711,47 @@ class MainPage extends Component {
                 }
             }
 
+            const jobId = startResp.data.job_id;
+            if (!jobId) throw new Error('No job_id returned from server');
+
+            // Poll for completion — up to 30 min at 2s intervals
+            const maxAttempts = 900;
+            let final = null;
+            for (let i = 0; i < maxAttempts; i++) {
+                if (this._abortController.signal.aborted) throw new Error('aborted');
+                const statusResp = await axios.get(
+                    `${apiUrl}/generation_status/${jobId}`,
+                    { timeout: 15000, signal: this._abortController.signal }
+                );
+                if (statusResp.data.status === 'completed') {
+                    final = statusResp.data;
+                    break;
+                }
+                if (statusResp.data.status === 'error') {
+                    throw new Error(statusResp.data.error || 'Generation failed');
+                }
+                await new Promise(r => setTimeout(r, 2000));
+            }
+            if (!final) throw new Error('Generation timed out after 30 minutes');
+
             if (this._generationMsgInterval) clearInterval(this._generationMsgInterval);
+
+            if (final.segments_failed > 0) {
+                this.showToast(
+                    `${final.segments_failed} of ${final.segments_changed + final.segments_failed} edits couldn't be generated (kept original audio).`,
+                    'info'
+                );
+            }
 
             this.setState({
                 isGenerating: false,
                 generationMessage: '',
-                generatedAudio: response.data.modified_audio,
+                generatedAudio: final.modified_audio,
                 generatedStats: {
-                    segments_processed: response.data.segments_processed,
-                    segments_changed: response.data.segments_changed,
-                    ...response.data.stats,
+                    segments_processed: final.segments_processed,
+                    segments_changed: final.segments_changed,
+                    segments_failed: final.segments_failed,
+                    ...final.stats,
                 },
             });
 

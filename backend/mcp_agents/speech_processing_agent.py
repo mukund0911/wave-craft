@@ -184,12 +184,30 @@ class SpeechProcessingAgent(MCPAgent):
             # Assemble final audio
             final_audio_b64 = self._assemble_audio(processed_segments)
 
-            logger.info(f"✓ All {len(processed_segments)} segments processed")
+            # Compute failure stats — segments requested to change that fell back
+            failures = []
+            failed_count = 0
+            for idx, (seg, task) in enumerate(zip(processed_segments, tasks)):
+                if seg.get("method") == "fallback":
+                    failed_count += 1
+                    failures.append({
+                        "index": idx,
+                        "speaker": seg.get("speaker"),
+                        "error": seg.get("error", "unknown"),
+                    })
+
+            logger.info(
+                f"✓ {len(processed_segments)} segments: "
+                f"{sum(1 for s in processed_segments if s.get('changed'))} regenerated, "
+                f"{failed_count} failed"
+            )
 
             return self.create_response(True, {
                 "modified_audio": final_audio_b64,
                 "segments_processed": len(processed_segments),
                 "segments_changed": sum(1 for s in processed_segments if s.get("changed")),
+                "segments_failed": failed_count,
+                "failures": failures[:20],  # cap list to avoid bloat
                 "stats": self.chatterbox_agent.get_stats()
             })
 
@@ -249,20 +267,24 @@ class SpeechProcessingAgent(MCPAgent):
         })
 
         if result["success"] and result.get("data"):
+            data = result["data"]
             return {
-                "audio_base64": result["data"].get("audio_base64", reference_audio_b64),
-                "changed": result["data"].get("changed", False),
+                "audio_base64": data.get("audio_base64", reference_audio_b64),
+                "changed": data.get("changed", False),
                 "speaker": speaker,
-                "method": result["data"].get("method", "unknown")
+                "method": data.get("method", "unknown"),
+                "error": data.get("error"),
             }
         else:
             # Fallback to original
-            logger.warning(f"Speaker {speaker}: Chatterbox failed, using original")
+            err = result.get("error", "unknown")
+            logger.warning(f"Speaker {speaker}: Chatterbox failed ({err}), using original")
             return {
                 "audio_base64": reference_audio_b64,
                 "changed": False,
                 "speaker": speaker,
-                "method": "fallback"
+                "method": "fallback",
+                "error": err,
             }
 
     def _assemble_audio(self, segments: List[Dict[str, Any]],

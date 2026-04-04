@@ -190,7 +190,7 @@ class WhisperXAgent(MCPAgent):
             response = _request_with_retry(
                 MODAL_TRANSCRIBE_URL,
                 payload,
-                timeout=300,
+                timeout=1800,  # 30 min — handles long-form podcasts
             )
             result = response.json()
 

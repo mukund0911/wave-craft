@@ -149,8 +149,9 @@ class ChatterboxAgent(MCPAgent):
 
     def _modify_speech_remote(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Send TTS request to Modal GPU service."""
+        import time as _time
+        reference_audio_b64 = request.get("reference_audio_b64", "")
         try:
-            reference_audio_b64 = request.get("reference_audio_b64", "")
             original_text = request.get("original_text", "")
             modified_text = request.get("modified_text", "")
             emotions = request.get("emotions", [])
@@ -187,15 +188,23 @@ class ChatterboxAgent(MCPAgent):
                 "cfg_weight": cfg_weight,
             }
 
+            with self._stats_lock:
+                self._stats["total_requests"] += 1
+
             logger.info(f"Sending TTS to Modal: '{processed_text[:60]}...' exag={effective_exaggeration:.2f} cfg={cfg_weight:.2f}")
+            t_start = _time.time()
             response = _request_with_retry(
                 MODAL_TTS_URL,
                 payload,
                 timeout=120,
             )
+            elapsed = _time.time() - t_start
             result = response.json()
 
             if result.get("status") == "completed":
+                with self._stats_lock:
+                    self._stats["successful"] += 1
+                    self._stats["total_inference_time"] += elapsed
                 return self.create_response(True, {
                     "audio_base64": result["audio"],
                     "changed": True,
@@ -205,9 +214,11 @@ class ChatterboxAgent(MCPAgent):
                 raise Exception(result.get("error", "Modal TTS failed"))
 
         except Exception as e:
-            logger.error(f"Modal TTS failed: {e}", exc_info=True)
+            logger.error(f"Modal TTS failed: {e}")
+            with self._stats_lock:
+                self._stats["failed"] += 1
             return self.create_response(True, {
-                "audio_base64": request.get("reference_audio_b64", ""),
+                "audio_base64": reference_audio_b64,
                 "changed": False,
                 "method": "fallback",
                 "error": str(e)

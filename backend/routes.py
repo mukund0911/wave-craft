@@ -296,15 +296,15 @@ def check_status(job_id):
 # Modified transcript → audio generation
 # ──────────────────────────────────────────────────
 
+MAX_SEGMENTS = 2000  # realistic upper bound for long-form podcasts
+
+
 @main.route('/conversations_modified', methods=['POST'])
 def modified_transcript():
     """
-    Process modified transcripts and generate final audio.
+    Process modified transcripts and generate final audio (async).
 
-    Expects multipart form data or JSON with:
-    - conversations_updated: JSON list of modified conversations
-    - full_audio: base64 of original audio (optional)
-    - Each conversation can have emotion tags
+    Returns job_id immediately; poll /generation_status/<job_id> for result.
     """
     try:
         # Parse request data (handle both multipart and JSON)
@@ -322,60 +322,116 @@ def modified_transcript():
 
         if not conversations:
             return jsonify({"error": "No conversations provided"}), 400
-
-        # Validate conversations
         if not isinstance(conversations, list):
             return jsonify({"error": "conversations must be a list"}), 400
-        if len(conversations) > 50:
-            return jsonify({"error": "Too many segments (max 50)"}), 400
+        if len(conversations) > MAX_SEGMENTS:
+            return jsonify({"error": f"Too many segments (max {MAX_SEGMENTS})"}), 400
 
-        logger.info(f"Processing {len(conversations)} modified conversations")
+        logger.info(f"Queued {len(conversations)} modified conversations for generation")
 
-        # Use speech agent to process modifications
-        speech_agent = get_speech_agent()
+        # Start async generation
+        job_id = str(uuid.uuid4())
+        with job_lock:
+            job_store[job_id] = {
+                "kind": "generation",
+                "status": "processing",
+                "result": None,
+                "error": None,
+            }
 
-        request_data = {
-            "action": "process_modifications",
-            "conversations": conversations,
-            "full_audio": full_audio
-        }
+        app = current_app._get_current_object()
+        _executor.submit(_run_generation, app, job_id, conversations, full_audio)
 
-        # Process modifications synchronously
-        result = speech_agent.handle_modifications(request_data)
-
-        if not result.get("success"):
-            error_msg = result.get("error", "Processing failed")
-            logger.error(f"Modification processing failed: {error_msg}")
-            return jsonify({"error": error_msg}), 500
-
-        result_data = result.get("data", {})
-
-        # Build response
-        response_data = {
-            "modified_audio": result_data.get("modified_audio", ""),
-            "segments_processed": result_data.get("segments_processed", 0),
-            "segments_changed": result_data.get("segments_changed", 0),
-            "stats": result_data.get("stats", {})
-        }
-
-        # Try S3 upload if enabled
-        if os.environ.get("S3_ENABLED", "false").lower() == "true":
-            try:
-                from .utils.s3_storage import S3AudioStorage
-                storage = S3AudioStorage()
-                audio_bytes = base64.b64decode(response_data["modified_audio"])
-                url = storage.upload_and_get_url(audio_bytes)
-                if url:
-                    response_data["audio_url"] = url
-                    logger.info(f"Uploaded to S3: {url}")
-            except Exception as s3_err:
-                logger.warning(f"S3 upload failed (using base64 fallback): {s3_err}")
-
-        return jsonify(response_data), 200
+        return jsonify({
+            "status": "processing",
+            "job_id": job_id,
+            "message": f"Generation started for {len(conversations)} segments"
+        }), 202
 
     except Exception as e:
         logger.error(f"Modified transcript endpoint failed: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+def _run_generation(app, job_id: str, conversations: list, full_audio: str):
+    """Background generation task."""
+    try:
+        with app.app_context():
+            speech_agent = get_speech_agent()
+            result = speech_agent.handle_modifications({
+                "action": "process_modifications",
+                "conversations": conversations,
+                "full_audio": full_audio,
+            })
+
+            if not result.get("success"):
+                with job_lock:
+                    job_store[job_id] = {
+                        "kind": "generation",
+                        "status": "error",
+                        "result": None,
+                        "error": result.get("error", "Processing failed"),
+                    }
+                return
+
+            result_data = result.get("data", {})
+            response_data = {
+                "modified_audio": result_data.get("modified_audio", ""),
+                "segments_processed": result_data.get("segments_processed", 0),
+                "segments_changed": result_data.get("segments_changed", 0),
+                "segments_failed": result_data.get("segments_failed", 0),
+                "failures": result_data.get("failures", []),
+                "stats": result_data.get("stats", {}),
+            }
+
+            # Optional S3 upload
+            if os.environ.get("S3_ENABLED", "false").lower() == "true":
+                try:
+                    from .utils.s3_storage import S3AudioStorage
+                    storage = S3AudioStorage()
+                    audio_bytes = base64.b64decode(response_data["modified_audio"])
+                    url = storage.upload_and_get_url(audio_bytes)
+                    if url:
+                        response_data["audio_url"] = url
+                        logger.info(f"Uploaded to S3: {url}")
+                except Exception as s3_err:
+                    logger.warning(f"S3 upload failed (using base64 fallback): {s3_err}")
+
+            with job_lock:
+                job_store[job_id] = {
+                    "kind": "generation",
+                    "status": "completed",
+                    "result": response_data,
+                    "error": None,
+                }
+
+    except Exception as e:
+        logger.error(f"Background generation failed: {e}", exc_info=True)
+        with job_lock:
+            job_store[job_id] = {
+                "kind": "generation",
+                "status": "error",
+                "result": None,
+                "error": str(e),
+            }
+
+
+@main.route('/generation_status/<job_id>', methods=['GET'])
+def generation_status(job_id):
+    """Poll generation job status."""
+    with job_lock:
+        job = job_store.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        status = job["status"]
+        result = job.get("result")
+        error = job.get("error")
+
+    if status == "completed" and result:
+        return jsonify({"status": "completed", **result}), 200
+    if status == "error":
+        return jsonify({"status": "error", "error": error or "Unknown error"}), 500
+    return jsonify({"status": "processing", "message": "Generation in progress..."}), 200
 
 
 # ──────────────────────────────────────────────────
