@@ -1,15 +1,13 @@
 """
-WaveCrafter Backend Routes (Revamped)
+WaveCrafter Backend Routes (LangGraph refactor)
 
 API Endpoints:
-  POST /upload          - Upload audio file for transcription
-  GET  /status/<job_id> - Check transcription status (kept for compatibility)
-  POST /conversations_modified - Process modified transcripts → generate audio
-
-Removed:
-  - Speech/music classification (all uploads are speech now)
-  - AssemblyAI (replaced by WhisperX)
-  - VoiceCraft/Modal (replaced by Chatterbox)
+  POST /upload                 - Upload audio file for transcription
+  GET  /status/<job_id>        - Check transcription status
+  POST /conversations_modified - Process modified transcripts -> generate audio
+  POST /artificial_speaker     - Generate AI speaker dialogue + voice
+  GET  /generation_status/<job_id> - Poll generation progress
+  GET  /health                 - Health check
 """
 
 import os
@@ -39,7 +37,7 @@ class TTLCache:
     def __init__(self, max_size=20, ttl_seconds=1800):
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
-        self._store = {}  # key -> (value, timestamp)
+        self._store = {}
         self._lock = threading.Lock()
 
     def get(self, key, default=None):
@@ -71,7 +69,6 @@ class TTLCache:
         self.set(key, value)
 
     def _evict(self):
-        """Remove expired entries, then oldest if over capacity."""
         now = time.time()
         expired = [k for k, (_, ts) in self._store.items() if now - ts > self.ttl_seconds]
         for k in expired:
@@ -81,27 +78,42 @@ class TTLCache:
             del self._store[oldest_key]
 
 
-# In-memory caches with TTL
 audio_cache = TTLCache(max_size=20, ttl_seconds=1800)
 job_store = TTLCache(max_size=100, ttl_seconds=3600)
-
-# Lock for thread-safe job_store access
 job_lock = threading.Lock()
-
-# Thread pool for background transcription
 _executor = ThreadPoolExecutor(max_workers=3)
 
 
-def get_speech_agent():
-    """Get speech processing agent from app context"""
-    from .mcp_agents.speech_processing_agent import SpeechProcessingAgent
-    if not hasattr(current_app, '_speech_agent'):
-        current_app._speech_agent = SpeechProcessingAgent()
-    return current_app._speech_agent
+# ──────────────────────────────────────────────────
+# Graph accessors (lazy singleton per app context)
+# ──────────────────────────────────────────────────
 
+def get_transcription_graph():
+    from .langgraph_agents.graphs import build_transcription_graph
+    if not hasattr(current_app, '_transcription_graph'):
+        current_app._transcription_graph = build_transcription_graph()
+    return current_app._transcription_graph
+
+
+def get_modification_graph():
+    from .langgraph_agents.graphs import build_modification_graph
+    if not hasattr(current_app, '_modification_graph'):
+        current_app._modification_graph = build_modification_graph()
+    return current_app._modification_graph
+
+
+def get_artificial_speaker_graph():
+    from .langgraph_agents.graphs import build_artificial_speaker_graph
+    if not hasattr(current_app, '_artificial_speaker_graph'):
+        current_app._artificial_speaker_graph = build_artificial_speaker_graph()
+    return current_app._artificial_speaker_graph
+
+
+# ──────────────────────────────────────────────────
+# Utilities
+# ──────────────────────────────────────────────────
 
 def file_hash(filepath: str) -> str:
-    """Calculate MD5 hash for cache key"""
     h = hashlib.md5()
     with open(filepath, 'rb') as f:
         for chunk in iter(lambda: f.read(8192), b''):
@@ -110,11 +122,9 @@ def file_hash(filepath: str) -> str:
 
 
 def save_upload(file) -> str:
-    """Save uploaded file to temp directory with UUID suffix to prevent collisions, return path"""
     from werkzeug.utils import secure_filename
     upload_dir = os.path.join(os.path.dirname(__file__), 'uploads')
     os.makedirs(upload_dir, exist_ok=True)
-
     safe_name = secure_filename(file.filename) or 'upload.wav'
     name, ext = os.path.splitext(safe_name)
     unique_name = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
@@ -129,16 +139,6 @@ def save_upload(file) -> str:
 
 @main.route('/upload', methods=['POST'])
 def upload_file():
-    """
-    Upload audio file for transcription.
-
-    WhisperX is fast enough to run synchronously for small files.
-    For larger files we still use async with polling.
-
-    Returns:
-        - If fast mode (< 30s audio): immediate transcription result
-        - If async mode: job_id for polling via /status/<job_id>
-    """
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -147,11 +147,9 @@ def upload_file():
         return jsonify({"error": "No file selected"}), 400
 
     try:
-        # Save upload
         filepath = save_upload(file)
         logger.info(f"Upload received: {file.filename}")
 
-        # Parse optional num_speakers
         num_speakers = request.form.get('num_speakers')
         if num_speakers:
             try:
@@ -161,12 +159,10 @@ def upload_file():
             except (ValueError, TypeError):
                 num_speakers = None
 
-        # Check cache
         fhash = file_hash(filepath)
         if fhash in audio_cache:
             logger.info(f"Cache hit: {fhash}")
             cached = audio_cache[fhash]
-            # Clean up the uploaded file since we have a cache hit
             try:
                 os.remove(filepath)
             except OSError:
@@ -178,9 +174,7 @@ def upload_file():
                 "cached": True
             }), 200
 
-        # Start async transcription in background thread
         job_id = str(uuid.uuid4())
-
         with job_lock:
             job_store[job_id] = {
                 "status": "processing",
@@ -190,7 +184,6 @@ def upload_file():
                 "fhash": fhash
             }
 
-        # Run transcription in thread pool
         app = current_app._get_current_object()
         _executor.submit(_run_transcription, app, job_id, filepath, fhash, num_speakers)
 
@@ -206,35 +199,50 @@ def upload_file():
 
 
 def _run_transcription(app, job_id: str, filepath: str, fhash: str, num_speakers: int = None):
-    """Background transcription task"""
+    """Background transcription task using LangGraph."""
+    optimized_path = None
     try:
         with app.app_context():
-            speech_agent = get_speech_agent()
-            result = speech_agent.transcribe_audio(filepath, num_speakers=num_speakers)
+            graph = get_transcription_graph()
+            result = graph.invoke({
+                "audio_path": filepath,
+                "num_speakers": num_speakers,
+            })
 
-            with job_lock:
-                if result["status"] == "completed":
-                    job_store[job_id] = {
-                        "status": "completed",
-                        "result": result,
-                        "error": None,
-                        "filepath": filepath,
-                        "fhash": fhash
-                    }
+            optimized_path = result.get("audio_path")
 
-                    # Cache the result
-                    audio_cache[fhash] = {
-                        "conversations": result["conversations"],
-                        "full_audio": result["full_audio"]
-                    }
-                else:
+            error = result.get("error")
+            if error:
+                with job_lock:
                     job_store[job_id] = {
                         "status": "error",
                         "result": None,
-                        "error": result.get("error", "Unknown error"),
+                        "error": error,
                         "filepath": filepath,
                         "fhash": fhash
                     }
+                return
+
+            conversations = result.get("conversations", [])
+            full_audio = result.get("full_audio", "")
+            language = result.get("language", "en")
+
+            with job_lock:
+                job_store[job_id] = {
+                    "status": "completed",
+                    "result": {
+                        "conversations": conversations,
+                        "full_audio": full_audio,
+                        "language": language,
+                    },
+                    "error": None,
+                    "filepath": filepath,
+                    "fhash": fhash
+                }
+                audio_cache[fhash] = {
+                    "conversations": conversations,
+                    "full_audio": full_audio
+                }
 
     except Exception as e:
         logger.error(f"Background transcription failed: {e}", exc_info=True)
@@ -247,8 +255,11 @@ def _run_transcription(app, job_id: str, filepath: str, fhash: str, num_speakers
                 "fhash": fhash
             }
     finally:
-        # Always clean up uploaded file
         try:
+            # Clean up optimized temp file if it was created and differs from original
+            if optimized_path and optimized_path != filepath and os.path.exists(optimized_path):
+                os.remove(optimized_path)
+                logger.info(f"Cleaned up optimized audio: {optimized_path}")
             if os.path.exists(filepath):
                 os.remove(filepath)
                 logger.info(f"Cleaned up upload: {filepath}")
@@ -262,12 +273,10 @@ def _run_transcription(app, job_id: str, filepath: str, fhash: str, num_speakers
 
 @main.route('/status/<job_id>', methods=['GET'])
 def check_status(job_id):
-    """Check transcription job status"""
     with job_lock:
         job = job_store.get(job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        # Copy status and relevant data while holding the lock
         status = job["status"]
         result = job.get("result")
         error = job.get("error")
@@ -276,15 +285,14 @@ def check_status(job_id):
         return jsonify({
             "status": "completed",
             "conversations": result["conversations"],
-            "full_audio": result["full_audio"]
+            "full_audio": result["full_audio"],
+            "language": result.get("language", "en"),
         }), 200
-
     elif status == "error":
         return jsonify({
             "status": "error",
             "error": error or "Unknown error"
         }), 500
-
     else:
         return jsonify({
             "status": "processing",
@@ -293,21 +301,15 @@ def check_status(job_id):
 
 
 # ──────────────────────────────────────────────────
-# Modified transcript → audio generation
+# Modified transcript -> audio generation
 # ──────────────────────────────────────────────────
 
-MAX_SEGMENTS = 2000  # realistic upper bound for long-form podcasts
+MAX_SEGMENTS = 2000
 
 
 @main.route('/conversations_modified', methods=['POST'])
 def modified_transcript():
-    """
-    Process modified transcripts and generate final audio (async).
-
-    Returns job_id immediately; poll /generation_status/<job_id> for result.
-    """
     try:
-        # Parse request data (handle both multipart and JSON)
         if request.content_type and 'multipart' in request.content_type:
             conversations_str = request.form.get('conversations_updated', '[]')
             full_audio = request.form.get('full_audio', '')
@@ -329,7 +331,6 @@ def modified_transcript():
 
         logger.info(f"Queued {len(conversations)} modified conversations for generation")
 
-        # Start async generation
         job_id = str(uuid.uuid4())
         with job_lock:
             job_store[job_id] = {
@@ -354,48 +355,38 @@ def modified_transcript():
 
 
 def _run_generation(app, job_id: str, conversations: list, full_audio: str):
-    """Background generation task."""
+    """Background generation task using LangGraph."""
     try:
         with app.app_context():
-            speech_agent = get_speech_agent()
-            result = speech_agent.handle_modifications({
-                "action": "process_modifications",
+            graph = get_modification_graph()
+            result = graph.invoke({
                 "conversations": conversations,
                 "full_audio": full_audio,
+                "retry_count": 0,
             })
 
-            if not result.get("success"):
+            error = result.get("error")
+            if error:
                 with job_lock:
                     job_store[job_id] = {
                         "kind": "generation",
                         "status": "error",
                         "result": None,
-                        "error": result.get("error", "Processing failed"),
+                        "error": error,
                     }
                 return
 
-            result_data = result.get("data", {})
             response_data = {
-                "modified_audio": result_data.get("modified_audio", ""),
-                "segments_processed": result_data.get("segments_processed", 0),
-                "segments_changed": result_data.get("segments_changed", 0),
-                "segments_failed": result_data.get("segments_failed", 0),
-                "failures": result_data.get("failures", []),
-                "stats": result_data.get("stats", {}),
+                "modified_audio": result.get("final_audio", ""),
+                "segments_processed": result.get("segments_processed", 0),
+                "segments_changed": result.get("segments_changed", 0),
+                "segments_failed": result.get("segments_failed", 0),
+                "failures": result.get("failures", []),
+                "stats": result.get("stats", {}),
             }
 
-            # Optional S3 upload
-            if os.environ.get("S3_ENABLED", "false").lower() == "true":
-                try:
-                    from .utils.s3_storage import S3AudioStorage
-                    storage = S3AudioStorage()
-                    audio_bytes = base64.b64decode(response_data["modified_audio"])
-                    url = storage.upload_and_get_url(audio_bytes)
-                    if url:
-                        response_data["audio_url"] = url
-                        logger.info(f"Uploaded to S3: {url}")
-                except Exception as s3_err:
-                    logger.warning(f"S3 upload failed (using base64 fallback): {s3_err}")
+            if result.get("s3_url"):
+                response_data["audio_url"] = result["s3_url"]
 
             with job_lock:
                 job_store[job_id] = {
@@ -418,7 +409,138 @@ def _run_generation(app, job_id: str, conversations: list, full_audio: str):
 
 @main.route('/generation_status/<job_id>', methods=['GET'])
 def generation_status(job_id):
-    """Poll generation job status."""
+    with job_lock:
+        job = job_store.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        status = job["status"]
+        result = job.get("result")
+        error = job.get("error")
+
+    if status == "completed" and result:
+        return jsonify({"status": "completed", **result}), 200
+    if status == "error":
+        return jsonify({"status": "error", "error": error or "Unknown error"}), 500
+    return jsonify({"status": "processing", "message": "Generation in progress..."}), 200
+
+
+# ──────────────────────────────────────────────────
+# Artificial Speaker endpoint
+# ──────────────────────────────────────────────────
+
+@main.route('/artificial_speaker', methods=['POST'])
+def artificial_speaker():
+    """
+    Queue an AI speaker generation job.
+
+    Request JSON:
+        {
+            "prompt": "Explain quantum computing like I'm five",
+            "speaker_characteristics": "warm female voice, calm",
+            "speaker_name": "AI",
+            "exaggeration": 0.5,
+            "use_openai_tts": false,
+            "conversation_history": []
+        }
+
+    Returns 202:
+        {
+            "status": "processing",
+            "job_id": "...",
+            "message": "Artificial speaker generation started"
+        }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+        prompt = data.get("prompt", "").strip()
+        if not prompt:
+            return jsonify({"error": "Missing prompt"}), 400
+
+        job_id = str(uuid.uuid4())
+        with job_lock:
+            job_store[job_id] = {
+                "kind": "artificial_speaker",
+                "status": "processing",
+                "result": None,
+                "error": None,
+            }
+
+        app = current_app._get_current_object()
+        _executor.submit(
+            _run_artificial_speaker,
+            app, job_id, prompt,
+            data.get("speaker_characteristics", ""),
+            data.get("speaker_name", "AI"),
+            data.get("exaggeration", 0.5),
+            data.get("use_openai_tts", False),
+            data.get("conversation_history", []),
+        )
+
+        return jsonify({
+            "status": "processing",
+            "job_id": job_id,
+            "message": "Artificial speaker generation started"
+        }), 202
+
+    except Exception as e:
+        logger.error(f"Artificial speaker endpoint failed: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_artificial_speaker(app, job_id, prompt, speaker_characteristics, speaker_name, exaggeration, use_openai_tts, conversation_history):
+    """Background artificial speaker generation task using LangGraph."""
+    try:
+        with app.app_context():
+            graph = get_artificial_speaker_graph()
+            result = graph.invoke({
+                "prompt": prompt,
+                "speaker_characteristics": speaker_characteristics,
+                "speaker_name": speaker_name,
+                "exaggeration": exaggeration,
+                "use_openai_tts": use_openai_tts,
+                "conversation_history": conversation_history,
+            })
+
+            error = result.get("error")
+            if error:
+                with job_lock:
+                    job_store[job_id] = {
+                        "kind": "artificial_speaker",
+                        "status": "error",
+                        "result": None,
+                        "error": error,
+                    }
+                return
+
+            with job_lock:
+                job_store[job_id] = {
+                    "kind": "artificial_speaker",
+                    "status": "completed",
+                    "result": {
+                        "dialogue": result.get("generated_dialogue", ""),
+                        "audio": result.get("generated_audio", ""),
+                        "voice_used": result.get("voice_used", "unknown"),
+                    },
+                    "error": None,
+                }
+
+    except Exception as e:
+        logger.error(f"Background artificial speaker generation failed: {e}", exc_info=True)
+        with job_lock:
+            job_store[job_id] = {
+                "kind": "artificial_speaker",
+                "status": "error",
+                "result": None,
+                "error": str(e),
+            }
+
+
+@main.route('/artificial_speaker_status/<job_id>', methods=['GET'])
+def artificial_speaker_status(job_id):
+    """Poll artificial speaker generation job status."""
     with job_lock:
         job = job_store.get(job_id)
         if not job:
@@ -440,9 +562,8 @@ def generation_status(job_id):
 
 @main.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
     return jsonify({
         "status": "ok",
         "service": "wavecraft-api",
-        "engine": "whisperx+chatterbox"
+        "engine": "langgraph+whisperx+chatterbox"
     }), 200

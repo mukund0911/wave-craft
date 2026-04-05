@@ -1,45 +1,75 @@
 # WaveCrafter
 
-WaveCrafter is a web application that enables users to edit speech audio by providing speaker-wise transcripts. Users can modify the transcripts, and the app generates new audio while preserving the original speaker's style and emotions.
-
-
+WaveCrafter is a web application for editing speech audio via speaker-wise transcripts. Upload multi-speaker audio, get diarized transcripts, edit the text, and generate new audio preserving each speaker's voice through zero-shot voice cloning.
 
 ## Features
 
-- Upload multi-speaker audio files
-- Automatic speaker diarization and transcription
-- Speaker-wise transcript editing
-- Text-to-speech conversion maintaining speaker characteristics
-- Real-time 3D wave visualization background
-- Responsive web design
+- Upload multi-speaker audio files (podcasts, interviews, conversations)
+- Automatic speaker diarization and word-level transcription (WhisperX)
+- Speaker-wise transcript editing — click to delete words, double-click to insert
+- Emotion tagging and paralinguistic sounds (`[laugh]`, `[sigh]`, `[gasp]`)
+- Drag-to-reorder conversation segments
+- Text-to-speech voice cloning maintaining original speaker characteristics (Chatterbox)
+- **AI Speaker generation** — generate dialogue via GPT and synthesize with TTS
+- Real-time waveform visualization per segment
+- Responsive web design with dark/light theme support
+
+## Architecture
+
+Three-tier cloud-native setup:
+
+- **Frontend (React)** — deployed to GitHub Pages
+- **Backend (Flask)** — deployed to Heroku (CPU-only orchestration layer)
+- **GPU Service (Modal)** — WhisperX transcription + Chatterbox TTS on A10G GPUs
+
+The backend never runs ML models directly. It proxies to Modal endpoints for all inference. Audio is passed as base64-encoded WAV throughout.
+
+### Agent System (LangGraph)
+
+The backend uses LangGraph `StateGraph` for workflow orchestration:
+
+| Graph | Workflow |
+|---|---|
+| `TranscriptionGraph` | Optimize audio → WhisperX transcribe + diarize → segments |
+| `ModificationGraph` | Parse changes → parallel voice cloning → assemble → quality check → S3 |
+| `ArtificialSpeakerGraph` | GPT dialogue generation → TTS engine selection → synthesize |
+
+Agents live in `backend/langgraph_agents/agents/`:
+- `WhisperXAgent` — remote (Modal) or local transcription
+- `ChatterboxAgent` — remote (Modal) or local voice cloning TTS
+- `DialogueGeneratorAgent` — OpenAI GPT dialogue generation
+- `TextToSpeechAgent` — OpenAI TTS fast fallback
 
 ## Tech Stack
 
 ### Frontend
-- React.js
-- Three.js (for 3D wave visualization)
-- Axios (for API communication)
-- React Router (for navigation)
+- React 18
+- Axios (API communication)
+- React Router (navigation)
+- dnd-kit (drag-to-reorder)
+- wavesurfer.js (waveform visualization)
 - CSS3 for styling
 
 ### Backend
 - Flask (Python web framework)
-- Socket.IO (for real-time communication)
-- AssemblyAI API (for speech-to-text conversion)
-- Pydub (for audio processing)
+- LangGraph (agent workflow orchestration)
+- WhisperX (speech-to-text + diarization)
+- Chatterbox TTS (zero-shot voice cloning)
+- Pydub (audio processing)
+- OpenAI API (dialogue generation + TTS fallback)
 
 ### Deployment
-- Frontend: GitHub Pages
+- Frontend: GitHub Pages (via GitHub Actions)
 - Backend: Heroku
+- GPU Service: Modal Cloud (serverless A10G)
 - CI/CD: GitHub Actions
 
 ## Prerequisites
 
-Before running the application, make sure you have the following installed:
-- Node.js (v16 or higher)
+- Node.js (v18 or higher)
 - Python (v3.11.5)
-- npm (Node Package Manager)
-- pip (Python Package Manager)
+- npm
+- pip
 
 ## Installation
 
@@ -61,21 +91,12 @@ cd ../backend
 pip install -r requirements.txt
 ```
 
-## API Configuration
-
-1. Sign up for an AssemblyAI account at [https://www.assemblyai.com](https://www.assemblyai.com)
-2. Get your API key from the dashboard
-3. Create a `.env` file in the backend directory:
-```
-assembly_ai_key=your_api_key_here
-```
-
 ## Running Locally
 
 1. Start the backend server:
 ```bash
 cd backend
-python app.py
+python -m flask --app backend run
 ```
 
 2. Start the frontend development server:
@@ -86,41 +107,25 @@ npm start
 
 3. Open your browser and navigate to `http://localhost:3000`
 
-## Deployment
-
-### Frontend Deployment (GitHub Pages)
-
-The frontend is automatically deployed to GitHub Pages using GitHub Actions when changes are pushed to the main branch. The workflow is defined in `frontend_deploy.yml`.
-
-To configure:
-1. Enable GitHub Pages in your repository settings
-2. Set up the custom domain (if needed) in the repository settings
-3. The CNAME record is automatically configured through the workflow
-
-### Backend Deployment (Heroku)
-
-The backend is automatically deployed to Heroku using GitHub Actions when changes are pushed to the main branch. The workflow is defined in `heroku_deploy.yml`.
-
-To configure:
-1. Create a new Heroku app
-2. Add the following secrets to your GitHub repository:
-   - `HEROKU_API_KEY`
-   - `HEROKU_APP_NAME`
-   - `HEROKU_EMAIL`
-3. Add your AssemblyAI API key to Heroku's environment variables
-
 ## Environment Variables
 
 ### Frontend
 Create a `.env` file in the frontend directory:
 ```
-REACT_APP_API_URL=your_backend_url_here
+REACT_APP_API_URL=http://localhost:5000
 ```
 
 ### Backend
 Create a `.env` file in the backend directory:
 ```
-assembly_ai_key=your_assemblyai_api_key
+MODAL_TRANSCRIBE_URL=<Modal transcribe endpoint URL>
+MODAL_TTS_URL=<Modal synthesize endpoint URL>
+OPENAI_API_KEY=<OpenAI API key for dialogue generation and TTS fallback>
+HF_TOKEN=<HuggingFace token for pyannote diarization (local dev only)>
+AWS_ACCESS_KEY_ID=<optional>
+AWS_SECRET_ACCESS_KEY=<optional>
+AWS_S3_BUCKET=<optional>
+S3_ENABLED=false
 ```
 
 ## Project Structure
@@ -129,26 +134,48 @@ assembly_ai_key=your_assemblyai_api_key
 wave-crafter/
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   ├── styles/
+│   │   ├── components/       # React components
+│   │   ├── styles/           # CSS files
 │   │   └── App.js
 │   ├── package.json
-│   └── README.md
+│   └── build/
 ├── backend/
-│   ├── models/
-│   │   ├── speech_music_classifier/
-│   │   └── speech_edit/
-│   ├── app.py
-│   ├── routes.py
+│   ├── langgraph_agents/     # LangGraph workflow agents
+│   │   ├── agents/           # WhisperX, Chatterbox, Dialogue, TTS
+│   │   ├── state.py          # TypedDict state schemas
+│   │   ├── nodes.py          # Graph node implementations
+│   │   └── graphs.py         # Graph builders
+│   ├── utils/                # Audio quality, S3 storage
+│   ├── uploads/              # Temporary upload directory
+│   ├── routes.py             # Flask API routes
+│   ├── __init__.py           # Flask app factory
 │   └── requirements.txt
+├── modal_service/
+│   └── modal_app.py          # Modal GPU service (WhisperX + Chatterbox)
 ├── .github/
-│   └── workflows/
-│       ├── frontend_deploy.yml
-│       └── heroku_deploy.yml
+│   └── workflows/            # CI/CD for frontend, backend, Modal
+├── requirements-gpu.txt      # Local GPU dev dependencies
 └── README.md
 ```
 
+## Deployment
+
+### Frontend (GitHub Pages)
+
+Auto-deploys on push to `main` when `frontend/**` changes. See `.github/workflows/frontend_deploy.yml`.
+
+### Backend (Heroku)
+
+Auto-deploys via Heroku GitHub integration. Runtime: Python 3.11.5. Gunicorn command:
+```bash
+gunicorn "backend:create_app()" --timeout 120 --workers 1 --threads 2 --worker-class gthread
+```
+
+### Modal GPU Service
+
+Auto-deploys on push when `modal_service/**` changes. See `.github/workflows/modal_deploy.yml`.
+Requires `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` GitHub secrets.
+
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
+This project is licensed under the MIT License.

@@ -1,10 +1,7 @@
 """
-Chatterbox Voice Cloning & TTS Agent
-Supports two modes:
-- Remote: Calls Modal GPU service (when MODAL_SERVICE_URL is set)
-- Local:  Runs Chatterbox locally (dev mode)
+Chatterbox Voice Cloning & TTS Agent (LangGraph refactor)
+Supports remote (Modal GPU) or local inference.
 """
-
 import os
 import base64
 import logging
@@ -13,31 +10,13 @@ import time
 import threading
 import requests as http_requests
 from io import BytesIO
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from pydub import AudioSegment
-from .base_agent import MCPAgent
+from .base import create_response
 
 logger = logging.getLogger(__name__)
 
 MODAL_TTS_URL = os.environ.get("MODAL_TTS_URL", "")
-
-
-def _request_with_retry(url, payload, timeout, max_retries=2):
-    """HTTP POST with exponential backoff retry."""
-    last_err = None
-    for attempt in range(max_retries + 1):
-        try:
-            response = http_requests.post(url, json=payload, timeout=timeout)
-            response.raise_for_status()
-            return response
-        except (http_requests.exceptions.RequestException) as e:
-            last_err = e
-            if attempt < max_retries:
-                delay = (attempt + 1)  # 1s, 2s
-                logger.warning(f"Request attempt {attempt + 1} failed, retrying in {delay}s: {e}")
-                time.sleep(delay)
-    raise last_err
-
 
 # Lazy-loaded globals
 _chatterbox_model = None
@@ -53,52 +32,49 @@ def _get_torch():
 
 
 def _load_chatterbox(device: str):
-    """Load Chatterbox model (lazy, cached)"""
     global _chatterbox_model
     if _chatterbox_model is not None:
         return _chatterbox_model
-
     logger.info("Loading Chatterbox TTS model...")
     try:
         from chatterbox.tts_turbo import ChatterboxTurboTTS
         _chatterbox_model = ChatterboxTurboTTS.from_pretrained(device=device)
-        logger.info(f"✓ Chatterbox Turbo loaded on {device}")
+        logger.info(f"Chatterbox Turbo loaded on {device}")
     except (ImportError, Exception) as e:
         logger.warning(f"Turbo unavailable ({e}), falling back to base model")
         from chatterbox.tts import ChatterboxTTS
         _chatterbox_model = ChatterboxTTS.from_pretrained(device=device)
-        logger.info(f"✓ Chatterbox base loaded on {device}")
+        logger.info(f"Chatterbox base loaded on {device}")
     return _chatterbox_model
 
 
-# Supported emotion types
-EMOTION_TYPES = {
-    "happy", "sad", "angry", "excited", "calm",
-    "fearful", "surprised", "neutral"
-}
-
-# Paralinguistic tags supported by Chatterbox Turbo
+EMOTION_TYPES = {"happy", "sad", "angry", "excited", "calm", "fearful", "surprised", "neutral"}
 PARALINGUISTIC_TAGS = {
     "[laugh]", "[chuckle]", "[cough]", "[sigh]", "[gasp]",
     "[groan]", "[sniff]", "[clear throat]", "[shush]"
 }
 
 
-class ChatterboxAgent(MCPAgent):
-    """
-    Voice cloning and TTS agent using Chatterbox.
+def _request_with_retry(url, payload, timeout, max_retries=2):
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = http_requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except http_requests.exceptions.RequestException as e:
+            last_err = e
+            if attempt < max_retries:
+                delay = (attempt + 1)
+                logger.warning(f"Request attempt {attempt + 1} failed, retrying in {delay}s: {e}")
+                time.sleep(delay)
+    raise last_err
 
-    Solves the VoiceCraft word-insertion problem:
-    VoiceCraft tries to edit existing audio (fails on new words).
-    Chatterbox does full zero-shot synthesis from reference audio (works for any text).
-    """
+
+class ChatterboxAgent:
+    """Voice cloning and TTS using Chatterbox."""
 
     def __init__(self, device: str = None):
-        super().__init__("chatterbox_tts", [
-            "clone_voice", "generate_speech", "modify_speech"
-        ])
-
-        # Avoid loading torch locally if using Modal GPU service
         if MODAL_TTS_URL:
             self.device = "remote"
         else:
@@ -109,7 +85,6 @@ class ChatterboxAgent(MCPAgent):
                 self.device = "cuda"
             else:
                 self.device = "cpu"
-
         self._model = None
         self._stats = {
             "total_requests": 0,
@@ -118,106 +93,75 @@ class ChatterboxAgent(MCPAgent):
             "total_inference_time": 0.0
         }
         self._stats_lock = threading.Lock()
-
-        logger.info(f"ChatterboxAgent initialized: device={self.device}")
+        logger.info(f"ChatterboxAgent: device={self.device}")
 
     def _ensure_model(self):
-        """Lazy-load model on first use"""
         if self._model is None:
             self._model = _load_chatterbox(self.device)
 
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        action = request.get("action")
-
-        if action == "modify_speech":
-            return self._modify_speech(request)
-        elif action == "clone_voice":
-            return self._clone_voice(request)
-        elif action == "generate_speech":
-            return self._generate_speech(request)
-        else:
-            return self.create_response(False, error=f"Unknown action: {action}")
-
-    def _modify_speech(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate speech for modified text using reference speaker audio.
-        Routes to Modal if MODAL_TTS_URL is set, otherwise runs locally.
-        """
+    def modify_speech(self, request: Dict[str, Any]) -> Dict[str, Any]:
         if MODAL_TTS_URL:
             return self._modify_speech_remote(request)
         return self._modify_speech_local(request)
 
     def _modify_speech_remote(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Send TTS request to Modal GPU service."""
-        import time as _time
         reference_audio_b64 = request.get("reference_audio_b64", "")
+        original_text = request.get("original_text", "")
+        modified_text = request.get("modified_text", "")
+        emotions = request.get("emotions", [])
+        exaggeration = request.get("exaggeration", 0.5)
+
+        text_changed = original_text.strip() != modified_text.strip()
+        if not text_changed and not emotions:
+            return create_response("chatterbox", True, {
+                "audio_base64": reference_audio_b64,
+                "changed": False,
+                "method": "passthrough"
+            })
+
+        processed_text = self._apply_emotion_tags(modified_text, emotions)
+        effective_exaggeration = float(exaggeration)
+        for emotion in emotions:
+            if emotion.get("type") in EMOTION_TYPES:
+                effective_exaggeration = emotion.get("intensity", 0.5) * 2.0
+                break
+        effective_exaggeration = max(0.0, min(2.0, effective_exaggeration))
+
+        cfg_weight = 0.5
+        if effective_exaggeration > 0.7:
+            cfg_weight = max(0.1, 0.5 - (effective_exaggeration - 0.7) * 0.3)
+
+        payload = {
+            "text": processed_text,
+            "reference_audio": reference_audio_b64,
+            "exaggeration": effective_exaggeration,
+            "cfg_weight": cfg_weight,
+        }
+
+        with self._stats_lock:
+            self._stats["total_requests"] += 1
+
         try:
-            original_text = request.get("original_text", "")
-            modified_text = request.get("modified_text", "")
-            emotions = request.get("emotions", [])
-            exaggeration = request.get("exaggeration", 0.5)
-
-            # Skip if no changes
-            text_changed = original_text.strip() != modified_text.strip()
-            if not text_changed and not emotions:
-                return self.create_response(True, {
-                    "audio_base64": reference_audio_b64,
-                    "changed": False,
-                    "method": "passthrough"
-                })
-
-            processed_text = self._apply_emotion_tags(modified_text, emotions)
-
-            # Map emotion intensity to exaggeration (0-1 intensity → 0-2 exaggeration)
-            effective_exaggeration = float(exaggeration)
-            for emotion in emotions:
-                if emotion.get("type") in EMOTION_TYPES:
-                    effective_exaggeration = emotion.get("intensity", 0.5) * 2.0
-                    break
-            effective_exaggeration = max(0.0, min(2.0, effective_exaggeration))
-
-            # Lower cfg_weight when exaggeration is high to prevent speech racing
-            cfg_weight = 0.5
-            if effective_exaggeration > 0.7:
-                cfg_weight = max(0.1, 0.5 - (effective_exaggeration - 0.7) * 0.3)
-
-            payload = {
-                "text": processed_text,
-                "reference_audio": reference_audio_b64,
-                "exaggeration": effective_exaggeration,
-                "cfg_weight": cfg_weight,
-            }
-
-            with self._stats_lock:
-                self._stats["total_requests"] += 1
-
-            logger.info(f"Sending TTS to Modal: '{processed_text[:60]}...' exag={effective_exaggeration:.2f} cfg={cfg_weight:.2f}")
-            t_start = _time.time()
-            response = _request_with_retry(
-                MODAL_TTS_URL,
-                payload,
-                timeout=120,
-            )
-            elapsed = _time.time() - t_start
+            t_start = time.time()
+            response = _request_with_retry(MODAL_TTS_URL, payload, timeout=120)
+            elapsed = time.time() - t_start
             result = response.json()
-
             if result.get("status") == "completed":
                 with self._stats_lock:
                     self._stats["successful"] += 1
                     self._stats["total_inference_time"] += elapsed
-                return self.create_response(True, {
+                return create_response("chatterbox", True, {
                     "audio_base64": result["audio"],
                     "changed": True,
                     "method": "modal_chatterbox",
                 })
             else:
                 raise Exception(result.get("error", "Modal TTS failed"))
-
         except Exception as e:
             logger.error(f"Modal TTS failed: {e}")
             with self._stats_lock:
                 self._stats["failed"] += 1
-            return self.create_response(True, {
+            return create_response("chatterbox", True, {
                 "audio_base64": reference_audio_b64,
                 "changed": False,
                 "method": "fallback",
@@ -225,16 +169,11 @@ class ChatterboxAgent(MCPAgent):
             })
 
     def _modify_speech_local(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Run Chatterbox locally (dev mode)."""
-        import time
-
         with self._stats_lock:
             self._stats["total_requests"] += 1
         start_time = time.time()
-
         try:
             self._ensure_model()
-
             reference_audio_b64 = request.get("reference_audio_b64")
             original_text = request.get("original_text", "")
             modified_text = request.get("modified_text", "")
@@ -242,66 +181,43 @@ class ChatterboxAgent(MCPAgent):
             exaggeration = request.get("exaggeration", 0.5)
 
             if not reference_audio_b64:
-                return self.create_response(False, error="Missing reference_audio_b64")
+                return create_response("chatterbox", False, error="Missing reference_audio_b64")
             if not modified_text:
-                return self.create_response(False, error="Missing modified_text")
+                return create_response("chatterbox", False, error="Missing modified_text")
 
-            # Check if text actually changed
             text_changed = original_text.strip() != modified_text.strip()
-
             if not text_changed and not emotions:
-                # No changes — return original audio
-                logger.info("No text or emotion changes — returning original audio")
-                return self.create_response(True, {
+                return create_response("chatterbox", True, {
                     "audio_base64": reference_audio_b64,
                     "changed": False,
                     "method": "passthrough"
                 })
 
-            # Process text with emotion tags
             processed_text = self._apply_emotion_tags(modified_text, emotions)
-
-            # Save reference audio to temp file (Chatterbox needs file path)
             ref_audio_path = self._save_temp_audio(reference_audio_b64)
-
             try:
-                # Map emotion intensity to exaggeration
                 effective_exaggeration = float(exaggeration)
                 for emotion in emotions:
                     if emotion.get("type") in EMOTION_TYPES:
                         effective_exaggeration = emotion.get("intensity", 0.5) * 2.0
                         break
                 effective_exaggeration = max(0.0, min(2.0, effective_exaggeration))
-
-                # Lower cfg_weight when exaggeration is high
                 cfg_weight = 0.5
                 if effective_exaggeration > 0.7:
                     cfg_weight = max(0.1, 0.5 - (effective_exaggeration - 0.7) * 0.3)
 
-                logger.info(f"Generating speech:")
-                logger.info(f"  Text: '{processed_text[:80]}...'")
-                logger.info(f"  Exaggeration: {effective_exaggeration:.2f}, cfg_weight: {cfg_weight:.2f}")
-                logger.info(f"  Text changed: {text_changed}")
-
-                # Generate with Chatterbox
                 wav = self._model.generate(
                     text=processed_text,
                     audio_prompt_path=ref_audio_path,
                     exaggeration=effective_exaggeration,
                     cfg_weight=cfg_weight,
                 )
-
-                # Convert to base64
                 output_b64 = self._tensor_to_base64(wav)
-
                 inference_time = time.time() - start_time
                 with self._stats_lock:
                     self._stats["successful"] += 1
                     self._stats["total_inference_time"] += inference_time
-
-                logger.info(f"✓ Generated in {inference_time:.2f}s")
-
-                return self.create_response(True, {
+                return create_response("chatterbox", True, {
                     "audio_base64": output_b64,
                     "changed": True,
                     "method": "chatterbox",
@@ -309,145 +225,78 @@ class ChatterboxAgent(MCPAgent):
                     "exaggeration": exaggeration,
                     "text_length": len(processed_text)
                 })
-
             finally:
-                # Clean up temp file
                 if os.path.exists(ref_audio_path):
                     os.remove(ref_audio_path)
-
         except Exception as e:
             with self._stats_lock:
                 self._stats["failed"] += 1
             logger.error(f"Voice cloning failed: {e}", exc_info=True)
-
-            # Fallback: return original audio
-            return self.create_response(True, {
+            return create_response("chatterbox", True, {
                 "audio_base64": request.get("reference_audio_b64", ""),
                 "changed": False,
                 "method": "fallback",
                 "error": str(e)
             })
 
-    def _clone_voice(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Alias for _modify_speech"""
-        return self._modify_speech(request)
-
-    def _generate_speech(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate speech for artificial speakers (no reference audio from conversation).
-        Uses a default neutral voice or specified characteristics.
-        """
-        import time
-
+    def generate_speech(self, text: str, exaggeration: float = 0.5) -> Dict[str, Any]:
         with self._stats_lock:
             self._stats["total_requests"] += 1
         start_time = time.time()
-
         try:
             self._ensure_model()
-
-            text = request.get("text", "")
-            speaker_characteristics = request.get("speaker_characteristics", "")
-            exaggeration = request.get("exaggeration", 0.5)
-
-            if not text:
-                return self.create_response(False, error="Missing text")
-
-            # For artificial speakers without reference audio,
-            # use Chatterbox's default voice
-            logger.info(f"Generating artificial speech: '{text[:60]}...'")
-
             wav = self._model.generate(
                 text=text,
                 exaggeration=max(0.0, min(1.0, float(exaggeration))),
             )
-
             output_b64 = self._tensor_to_base64(wav)
             inference_time = time.time() - start_time
             with self._stats_lock:
                 self._stats["successful"] += 1
-
-            return self.create_response(True, {
+            return create_response("chatterbox", True, {
                 "audio_base64": output_b64,
                 "voice_used": "chatterbox_default",
                 "inference_time": inference_time,
                 "text_length": len(text)
             })
-
         except Exception as e:
             with self._stats_lock:
                 self._stats["failed"] += 1
             logger.error(f"Speech generation failed: {e}", exc_info=True)
-            return self.create_response(False, error=f"Failed to generate speech: {str(e)}")
+            return create_response("chatterbox", False, error=f"Failed to generate speech: {str(e)}")
 
     def _apply_emotion_tags(self, text: str, emotions: List[Dict]) -> str:
-        """
-        Apply emotion tags to text for Chatterbox processing.
-
-        Chatterbox supports native paralinguistic tags like [laugh], [sigh], etc.
-        For tone emotions (happy, sad, etc.), we rely on the exaggeration parameter
-        and text-level styling.
-
-        Args:
-            text: Original text
-            emotions: List of emotion dicts:
-                [{"type": "happy", "range": [0, 5], "intensity": 0.8}]
-                [{"type": "[laugh]", "position": 5}]
-
-        Returns:
-            Processed text with tags inserted
-        """
         if not emotions:
             return text
-
-        # Sort by position (reverse order for safe insertion)
         insertions = []
         for emotion in emotions:
             etype = emotion.get("type", "")
-
-            # Paralinguistic tags get inserted into text
             if etype in PARALINGUISTIC_TAGS:
                 position = emotion.get("position", len(text))
                 insertions.append((position, etype))
-
-        # Insert tags in reverse order to preserve positions
         result = text
         for position, tag in sorted(insertions, key=lambda x: x[0], reverse=True):
-            # Insert tag at position with space padding
             result = result[:position] + f" {tag} " + result[position:]
-
         return result.strip()
 
     def _save_temp_audio(self, audio_b64: str) -> str:
-        """Save base64 audio to temp WAV file, return path"""
         audio_bytes = base64.b64decode(audio_b64)
         audio_seg = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
-
-        # Ensure WAV format, mono, 22050 Hz
         audio_seg = audio_seg.set_channels(1).set_frame_rate(22050)
-
         temp_path = tempfile.mktemp(suffix=".wav", prefix="chatterbox_ref_")
         audio_seg.export(temp_path, format="wav")
         return temp_path
 
     def _tensor_to_base64(self, wav_tensor) -> str:
-        """Convert PyTorch tensor to base64 WAV string"""
         import torchaudio
-
         buffer = BytesIO()
-
-        # Chatterbox returns tensor at model sample rate (typically 24000)
         sample_rate = self._model.sr if hasattr(self._model, 'sr') else 24000
-
-        # Ensure correct shape [channels, samples]
         if wav_tensor.dim() == 1:
             wav_tensor = wav_tensor.unsqueeze(0)
-
         torchaudio.save(buffer, wav_tensor.cpu(), sample_rate, format="wav")
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get performance statistics"""
         with self._stats_lock:
             total = self._stats["total_requests"]
             return {

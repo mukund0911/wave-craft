@@ -12,8 +12,9 @@ pydub>=0.25.1
 # HTTP (for calling Modal service)
 requests>=2.31.0
 
-# AI (for dialogue generation)
+# AI / Agents
 openai>=1.0.0
+langgraph>=0.2.0
 
 # AWS S3 (optional, for audio storage)
 boto3>=1.28.0

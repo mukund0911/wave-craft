@@ -6,6 +6,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import WaveSurfer from 'wavesurfer.js';
 import Header from './Header';
+import ArtificialSpeakerModal from './ArtificialSpeakerModal';
 import '../styles/MainPage.css';
 
 const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -199,6 +200,8 @@ class MainPage extends Component {
             isPlayingGenerated: false,
             // Toast
             toast: null,
+            // Artificial Speaker Modal
+            showArtificialSpeakerModal: false,
         };
 
         this.audioRef = React.createRef();
@@ -851,6 +854,98 @@ class MainPage extends Component {
     };
 
     // ──────────────────────────────────────────────────
+    // Artificial Speaker
+    // ──────────────────────────────────────────────────
+
+    handleOpenArtificialSpeaker = () => {
+        this.setState({ showArtificialSpeakerModal: true });
+    };
+
+    handleCloseArtificialSpeaker = () => {
+        this.setState({ showArtificialSpeakerModal: false });
+    };
+
+    handleArtificialSpeakerSubmit = async ({ prompt, speaker_characteristics, exaggeration }) => {
+        let startResp;
+        try {
+            startResp = await axios.post(
+                `${apiUrl}/artificial_speaker`,
+                {
+                    prompt,
+                    speaker_characteristics,
+                    exaggeration,
+                    speaker_name: 'AI',
+                    use_openai_tts: false,
+                },
+                { timeout: 30000 }
+            );
+        } catch (err) {
+            console.error('Artificial speaker error:', err);
+            const serverError = err.response?.data?.error || '';
+            const msg = serverError || err.message || 'Failed to start AI speaker generation.';
+            this.showToast(msg);
+            return;
+        }
+
+        const jobId = startResp.data.job_id;
+        if (!jobId) {
+            this.showToast('No job_id returned from server');
+            return;
+        }
+
+        // Poll for completion — up to 5 min at 2s intervals
+        const maxAttempts = 150;
+        let final = null;
+        try {
+            for (let i = 0; i < maxAttempts; i++) {
+                const statusResp = await axios.get(
+                    `${apiUrl}/artificial_speaker_status/${jobId}`,
+                    { timeout: 15000 }
+                );
+                if (statusResp.data.status === 'completed') {
+                    final = statusResp.data;
+                    break;
+                }
+                if (statusResp.data.status === 'error') {
+                    throw new Error(statusResp.data.error || 'Generation failed');
+                }
+                await new Promise(r => setTimeout(r, 2000));
+            }
+            if (!final) throw new Error('Generation timed out after 5 minutes');
+        } catch (err) {
+            console.error('Artificial speaker polling error:', err);
+            this.showToast(err.message || 'Failed to generate AI speaker.');
+            return;
+        }
+
+        const newConvKey = `conversation_ai_${Date.now()}`;
+        const newSegment = {
+            [newConvKey]: {
+                speaker: 'AI',
+                original: {
+                    text: final.dialogue,
+                    speaker_audio: final.audio,
+                    start: 0,
+                    end: 0,
+                    words: [],
+                },
+                modified: {
+                    text: final.dialogue,
+                    emotions: [],
+                },
+            }
+        };
+
+        this.setState(prev => ({
+            conversations: [newSegment, ...prev.conversations],
+            showArtificialSpeakerModal: false,
+        }));
+        this._pushUndo();
+        this._saveSession();
+        this.showToast('AI speaker added successfully', 'info');
+    };
+
+    // ──────────────────────────────────────────────────
     // Stats
     // ──────────────────────────────────────────────────
 
@@ -1013,6 +1108,7 @@ class MainPage extends Component {
             emotionPickerPosition, isGenerating, generatedAudio,
             generationMessage, generatedStats, toast,
             isPlayingGenerated, downloadPlaybackProgress,
+            showArtificialSpeakerModal,
         } = this.state;
 
         const stats = this.getEditStats();
@@ -1040,6 +1136,9 @@ class MainPage extends Component {
                             <span>Drag to reorder</span>
                         </p>
                         <div className="page-header-actions">
+                            <button className="header-action-btn" onClick={this.handleOpenArtificialSpeaker} title="Add an AI-generated speaker segment">
+                                Add AI Speaker
+                            </button>
                             <button className="header-action-btn" onClick={this.handleExportSRT} title="Export transcript as SRT subtitles">
                                 Export SRT
                             </button>
@@ -1340,6 +1439,13 @@ class MainPage extends Component {
                         {toast.message}
                     </div>
                 )}
+
+                {/* Artificial Speaker Modal */}
+                <ArtificialSpeakerModal
+                    isOpen={showArtificialSpeakerModal}
+                    onClose={this.handleCloseArtificialSpeaker}
+                    onSubmit={this.handleArtificialSpeakerSubmit}
+                />
 
                 {/* Hidden audio element */}
                 <audio ref={this.audioRef} style={{ display: 'none' }} />
